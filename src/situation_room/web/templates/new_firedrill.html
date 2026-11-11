@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}New firedrill · Situation Room{% endblock %}
+{% block content %}
+<h1>New firedrill</h1>
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+<form method="post" action="/firedrills/new" class="stack">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label>Title <span class="req">required</span>
+    <input name="title" required maxlength="200" value="{{ form.title or '' }}">
+  </label>
+  <label>Short description <span class="req">required, up to 500 characters</span>
+    <textarea name="short_description" required maxlength="500" rows="3">{{ form.short_description or '' }}</textarea>
+  </label>
+  <div class="two">
+    <label>Due date
+      <input type="date" name="due_date" value="{{ form.due_date or '' }}">
+    </label>
+    <label>From (person or group that sent it)
+      <input name="source" maxlength="200" value="{{ form.source or '' }}">
+    </label>
+  </div>
+  <div class="two">
+    <label>Requested by
+      <input name="requested_by" maxlength="200" value="{{ form.requested_by or '' }}">
+    </label>
+    <label>Ticket numbers (INC, CHG, RITM, REQ, PRB, TASK, SCTASK, CTASK)
+      <input name="ticket_text" maxlength="500" value="{{ form.ticket_text or '' }}">
+    </label>
+  </div>
+  <fieldset>
+    <legend>Owners <span class="req">pick at least one</span></legend>
+    {% for p in owners %}
+      <label class="check"><input type="checkbox" name="owner_ids" value="{{ p.id }}" {% if p.id in chosen %}checked{% endif %}> {{ p.display_name }} <span class="meta">{{ p.role.value|capitalize }}</span></label>
+    {% else %}
+      <p class="meta">No active managers or leads on the roster yet.{% if me.role.value == 'triage' %} <a href="/roster">Add people</a>.{% endif %}</p>
+    {% endfor %}
+  </fieldset>
+  <button class="primary" type="submit">Publish</button>
+</form>
+{% endblock %}

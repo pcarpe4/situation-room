@@ -1,0 +1,37 @@
+[project]
+name = "situation-room"
+version = "0.1.0"
+description = "A firedrill board: every open item, its owners, their status and the asks that keep it moving."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "alembic>=1.20.1",
+    "fastapi>=0.162.5",
+    "itsdangerous>=2.2.0",
+    "jinja2>=3.1.6",
+    "psycopg[binary]>=3.3.8",
+    "python-multipart>=0.0.33",
+    "sqlalchemy>=2.0",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[project.scripts]
+sr = "situation_room.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/situation_room"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[dependency-groups]
+dev = [
+    "httpx2>=2.16.0",
+    "pgserver>=0.1.4",
+    "pytest>=9.2.0",
+]

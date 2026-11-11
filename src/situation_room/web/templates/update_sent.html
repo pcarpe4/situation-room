@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% from "_macros.html" import status_badge with context %}
+{% block title %}Sent · {{ firedrill.title }}{% endblock %}
+{% block content %}
+<div class="narrow">
+<h1>Sent</h1>
+<p class="context"><a href="/f/{{ firedrill.public_id }}">{{ firedrill.title }}</a></p>
+<blockquote class="last">
+  <p class="meta">{{ status_badge(update.status) }}{% if update.on_behalf_of_id %} · posted for {{ owner.display_name }}{% endif %}</p>
+  <p>{{ update.text or "(no text)" }}</p>
+</blockquote>
+<p class="meta">Everyone signed in to the board can read this.
+{% if answered %} It answered {{ answered|length }} open {{ 'ask' if answered|length == 1 else 'asks' }}.{% endif %}
+Updates are never edited: send another one to correct it.</p>
+
+{% if others %}
+<h2>Also waiting on {{ 'you' if owner.id == me.id else owner.display_name }}</h2>
+<ul class="plain">
+  {% for row, line in others %}
+  <li><a href="/a/{{ line.assignment_id }}/update">{{ row.title }}</a>
+    {% if line.stale %}<span class="badge action">Stale {{ line.stale_days }} working days</span>{% endif %}
+    {% if line.open_ask %}<span class="badge info">asked</span>{% endif %}</li>
+  {% endfor %}
+</ul>
+{% endif %}
+<p><a class="button" href="{{ '/mine' if owner.id == me.id else '/board' }}">Back to {{ 'my assignments' if owner.id == me.id else 'the board' }}</a></p>
+</div>
+{% endblock %}

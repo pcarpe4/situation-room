@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% from "_macros.html" import firedrill_row with context %}
+{% block title %}Board · Situation Room{% endblock %}
+{% block content %}
+{% set chips = [
+  ('open', 'Open', 'firedrill'),
+  ('stale', 'Stale', 'owner'),
+  ('asked', 'Asked, no reply', 'owner'),
+  ('waiting', 'Waiting', 'owner'),
+  ('due', 'Due this week', 'firedrill'),
+  ('overdue', 'Overdue', 'firedrill'),
+] %}
+<nav class="chips" aria-label="Filters">
+  {% for key, label, noun in chips %}
+    {% set n = board.counts[key] %}
+    {% set unit = noun if n == 1 else noun ~ 's' %}
+    {% if key == board.active_filter %}
+      <span class="chip active" aria-current="true">{{ label }} · {{ n }} {{ unit }}</span>
+    {% elif n == 0 and key != 'open' %}
+      <span class="chip disabled">{{ label }} · 0</span>
+    {% else %}
+      <a class="chip" href="/board?filter={{ key }}">{{ label }} · {{ n }} {{ unit }}</a>
+    {% endif %}
+  {% endfor %}
+  {% if board.active_filter != 'open' %}<a class="chip clear" href="/board">Clear filter</a>{% endif %}
+</nav>
+
+<p class="result">{{ board.result_line }}</p>
+
+{% set back = '/board' if board.active_filter == 'open' else '/board?filter=' ~ board.active_filter %}
+{% for row in board.rows %}
+  {{ firedrill_row(row, back) }}
+{% else %}
+  <div class="empty">
+    {% if board.active_filter == 'open' %}
+      {% if me.role.value in ('lead', 'triage') %}
+        <p>Nothing is open. <a href="/firedrills/new">Start a firedrill</a>.</p>
+      {% else %}
+        <p>Nothing is open.</p>
+      {% endif %}
+    {% elif board.active_filter == 'stale' %}<p>Nothing is stale.</p>
+    {% elif board.active_filter == 'asked' %}<p>Every ask has an answer.</p>
+    {% elif board.active_filter == 'waiting' %}<p>Nobody is waiting on a date.</p>
+    {% elif board.active_filter == 'due' %}<p>Nothing is due this week.</p>
+    {% else %}<p>Nothing is overdue.</p>
+    {% endif %}
+  </div>
+{% endfor %}
+{% endblock %}

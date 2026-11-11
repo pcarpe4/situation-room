@@ -1,0 +1,85 @@
+{% macro status_badge(status) -%}
+<span class="badge status-{{ status.value }}">{{ status_label(status) }}</span>
+{%- endmacro %}
+
+{% macro hidden(back) -%}
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+<input type="hidden" name="back" value="{{ back }}">
+{%- endmacro %}
+
+{% macro ask_cell(row, line, back) -%}
+<div class="ask">
+{% if line.status == Status.DONE %}
+{% elif me.role.value in ('lead', 'triage') %}
+  {% set a = line.open_ask %}
+  {% if a and not a.confirmed_sent_at and a.asked_by_id == me.id %}
+    <span class="ask-state">Asked {{ a.requested_at|ago }}.</span>
+    <a class="button" href="{{ ask_link(row, line) }}">Open the email</a>
+    <span class="ask-state">Sent it?</span>
+    <form method="post" action="/asks/{{ a.id }}/sent">{{ hidden(back) }}<button type="submit">Yes</button></form>
+    <form method="post" action="/asks/{{ a.id }}/cancel">{{ hidden(back) }}<button class="quiet" type="submit">Cancel</button></form>
+  {% elif a %}
+    <span class="ask-state">Asked {{ a.requested_at|ago }}, no reply</span>
+    <form method="post" action="/a/{{ line.assignment_id }}/ask">{{ hidden(back) }}<button class="quiet" type="submit">Ask again</button></form>
+  {% elif line.waiting %}
+    <form method="post" action="/a/{{ line.assignment_id }}/ask">{{ hidden(back) }}<button class="quiet" type="submit">Ask anyway</button></form>
+  {% elif line.status == Status.NEW and not line.last_update_at %}
+    <span class="ask-state">Not yet asked</span>
+    <form method="post" action="/a/{{ line.assignment_id }}/ask">{{ hidden(back) }}<button class="primary" type="submit">Request update</button></form>
+  {% else %}
+    <form method="post" action="/a/{{ line.assignment_id }}/ask">{{ hidden(back) }}<button type="submit">Request update</button></form>
+  {% endif %}
+{% endif %}
+{% if line.owner_id == me.id and line.status != Status.DONE %}
+  <a class="button primary" href="/a/{{ line.assignment_id }}/update">Update</a>
+{% elif line.owner_id == me.id %}
+  <a class="button quiet" href="/a/{{ line.assignment_id }}/update">Update</a>
+{% endif %}
+</div>
+{%- endmacro %}
+
+{% macro owner_line(row, line, back) -%}
+<li class="line" id="a-{{ line.assignment_id }}">
+  <div class="line-head">
+    <strong>{{ line.owner_name }}</strong>
+    {% if line.waiting and line.status != Status.DONE %}
+      <span class="badge info">Waiting until {{ line.waiting_until|day }}</span>
+    {% else %}
+      {{ status_badge(line.status) }}
+    {% endif %}
+    {% if line.stale %}<span class="badge action">Stale {{ line.stale_days }} working days</span>{% endif %}
+  </div>
+  <div class="line-body">
+    {% if line.waiting and line.waiting_reason %}
+      <p class="update-text">{{ line.waiting_reason }}</p>
+    {% elif line.last_update_at %}
+      <p class="update-text">{{ line.last_update_text or "(no text)" }}</p>
+      <p class="meta">{{ line.last_update_at|ago }}{% if line.last_update_posted_for %} · <span class="badge info">posted for</span>{% endif %}</p>
+    {% else %}
+      <p class="meta">Assigned {{ line.assigned_at|ago }}</p>
+    {% endif %}
+  </div>
+  {{ ask_cell(row, line, back) }}
+</li>
+{%- endmacro %}
+
+{% macro firedrill_row(row, back) -%}
+<article class="row{% if row.stale %} is-stale{% endif %}">
+  <div class="row-head">
+    <h2><a href="/f/{{ row.public_id }}">{{ row.title }}</a></h2>
+    <div class="row-meta">
+      {% if row.ready_to_close %}<span class="badge changed">Ready to close</span>
+      {% elif row.overdue_days %}<span class="badge action">Overdue {{ row.overdue_days }}d</span>
+      {% endif %}
+      {% if row.due_date %}<span>Due {{ row.due_date|day }}</span>{% endif %}
+      {% if row.source %}<span>From {{ row.source }}</span>{% endif %}
+      {% for ref in row.ticket_refs %}<span class="ticket">{{ ref }}</span>{% endfor %}
+    </div>
+    <p class="desc">{{ row.short_description }}</p>
+  </div>
+  <ul class="lines">
+    {% for line in row.lines %}{{ owner_line(row, line, back) }}{% endfor %}
+  </ul>
+  {% if row.hidden_owners %}<p class="meta more">+{{ row.hidden_owners }} other {{ 'owner' if row.hidden_owners == 1 else 'owners' }}</p>{% endif %}
+</article>
+{%- endmacro %}

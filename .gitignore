@@ -1,0 +1,14 @@
+# Local runtime data (embedded Postgres, secrets)
+.data/
+.env
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+dist/
+build/
+
+# Review tooling scratch space
+.gstack/

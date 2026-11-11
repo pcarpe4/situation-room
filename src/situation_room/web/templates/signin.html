@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Sign in · Situation Room{% endblock %}
+{% block content %}
+<div class="narrow">
+<h1>Sign in</h1>
+{% if cfg.is_dev_signin %}
+  <p class="meta">Development sign-in: pick who to be.</p>
+  {% for p in people %}
+  <form method="post" action="/signin/dev" class="pick">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="person_id" value="{{ p.id }}">
+    <input type="hidden" name="next" value="{{ next }}">
+    <button type="submit">{{ p.display_name }} <span class="meta">{{ p.role.value|capitalize }}</span></button>
+  </form>
+  {% else %}
+  <p class="notice">The roster is empty. Run <code>uv run sr seed</code> for sample people.</p>
+  {% endfor %}
+{% endif %}
+</div>
+{% endblock %}

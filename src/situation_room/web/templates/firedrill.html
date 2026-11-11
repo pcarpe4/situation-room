@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% from "_macros.html" import owner_line, status_badge with context %}
+{% block title %}{{ firedrill.title }} · Situation Room{% endblock %}
+{% block content %}
+<p class="crumb"><a href="/board">Board</a></p>
+<h1>{{ firedrill.title }}</h1>
+<dl class="facts">
+  <div><dt>Description</dt><dd>{{ firedrill.short_description }}</dd></div>
+  {% if firedrill.due_date %}<div><dt>Due</dt><dd>{{ firedrill.due_date|day }}{% if row and row.overdue_days %} <span class="badge action">Overdue {{ row.overdue_days }}d</span>{% endif %}</dd></div>{% endif %}
+  {% if firedrill.source %}<div><dt>From</dt><dd>{{ firedrill.source }}</dd></div>{% endif %}
+  {% if firedrill.requested_by %}<div><dt>Requested by</dt><dd>{{ firedrill.requested_by }}</dd></div>{% endif %}
+  {% if firedrill.ticket_refs %}<div><dt>Tickets</dt><dd>{% for ref in firedrill.ticket_refs.split() %}<span class="ticket">{{ ref }}</span> {% endfor %}</dd></div>{% endif %}
+  <div><dt>State</dt><dd>{{ firedrill.state.value|capitalize }}</dd></div>
+</dl>
+
+{% if row %}
+<h2>Owners</h2>
+<ul class="lines">
+  {% for line in row.lines %}
+    {{ owner_line(row, line, '/f/' ~ firedrill.public_id) }}
+    {% if me.role.value in ('lead', 'triage') and line.owner_id != me.id and line.status != Status.DONE %}
+      <li class="post-for"><a href="/a/{{ line.assignment_id }}/update">Post an update for {{ line.owner_name }}</a></li>
+    {% endif %}
+  {% endfor %}
+</ul>
+{% endif %}
+
+<h2>Updates</h2>
+{% if history %}
+<ol class="history">
+  {% for upd, owner, assignment in history %}
+  <li>
+    <div class="line-head">
+      <strong>{{ owner.display_name }}</strong>
+      {% if upd.status %}{{ status_badge(upd.status) }}{% endif %}
+      {% if upd.on_behalf_of_id %}<span class="badge info">posted for, by {{ authors[upd.author_id].display_name }}</span>{% endif %}
+      {% if assignment.ended_at %}<span class="badge info">former owner</span>{% endif %}
+    </div>
+    <p class="update-text">{{ upd.text or "(no text)" }}</p>
+    <p class="meta" title="{{ upd.created_at|exact }}">{{ upd.created_at|ago }}</p>
+  </li>
+  {% endfor %}
+</ol>
+{% else %}
+<p class="meta">No updates yet.</p>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% from "_macros.html" import firedrill_row with context %}
+{% block title %}My assignments · Situation Room{% endblock %}
+{% block content %}
+<h1>My assignments</h1>
+{% for row in rows %}
+  {{ firedrill_row(row, '/mine') }}
+{% else %}
+  <div class="empty"><p>Nothing is assigned to you. <a href="/board">See the whole board</a>.</p></div>
+{% endfor %}
+{% endblock %}

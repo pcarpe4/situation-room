@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Situation Room{% endblock %}</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  {% if cfg.is_dev_signin %}<div class="devbar">Development sign-in. Not for real data.</div>{% endif %}
+  <header class="top">
+    <a class="brand" href="/">Situation Room</a>
+    {% if me %}
+    <nav>
+      <a href="/mine" {% if tab == 'mine' %}aria-current="page"{% endif %}>My assignments</a>
+      <a href="/board" {% if tab == 'board' %}aria-current="page"{% endif %}>Board</a>
+      {% if me.role.value in ('lead', 'triage') %}<a href="/firedrills/new">New firedrill</a>{% endif %}
+      {% if me.role.value == 'triage' %}<a href="/roster" {% if tab == 'roster' %}aria-current="page"{% endif %}>Roster</a>{% endif %}
+    </nav>
+    <form method="post" action="/signout" class="who">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <span>{{ me.display_name }} · {{ me.role.value|capitalize }}</span>
+      <button class="quiet" type="submit">Sign out</button>
+    </form>
+    {% endif %}
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

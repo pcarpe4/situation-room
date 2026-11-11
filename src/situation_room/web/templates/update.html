@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% from "_macros.html" import status_badge with context %}
+{% block title %}Update · {{ firedrill.title }}{% endblock %}
+{% block content %}
+<div class="narrow">
+<p class="context">
+  <a href="/f/{{ firedrill.public_id }}">{{ firedrill.title }}</a>
+  {% if firedrill.due_date %} · due {{ firedrill.due_date|day }}{% endif %}
+  {% if open_ask and asker %} · {{ asker.display_name }} asked {{ open_ask.requested_at|ago }}{% endif %}
+</p>
+
+{% if closed %}
+  <p class="notice">This firedrill is closed, so it takes no more updates.</p>
+{% elif ended %}
+  <p class="notice">This assignment has ended. Check the board for who owns it now.</p>
+{% else %}
+  {% if from_link %}<h1>Not sent yet</h1><p class="meta">Check the status, add a sentence if you like, and press Send.</p>
+  {% else %}<h1>Update{% if owner.id != me.id %} for {{ owner.display_name }}{% endif %}</h1>{% endif %}
+
+  {% if assignment.status == Status.DONE %}<p class="notice">This is marked done. Sending another status reopens it.</p>{% endif %}
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+
+  {% if last %}
+  <blockquote class="last">
+    <p class="meta">Last update {{ last.created_at|ago }}{% if last.status %} · {{ status_label(last.status) }}{% endif %}</p>
+    <p>{{ last.text or "(no text)" }}</p>
+  </blockquote>
+  {% endif %}
+
+  <form method="post" action="/a/{{ assignment.public_id }}/update" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="form_token" value="{{ form_token }}">
+    <fieldset class="statuses">
+      <legend>Status</legend>
+      {% for value, label in [('on_track', 'On track'), ('at_risk', 'At risk'), ('blocked', 'Blocked'), ('done', 'Done')] %}
+        <label class="status-choice"><input type="radio" name="status" value="{{ value }}" required {% if chosen == value %}checked{% endif %}> {{ label }}</label>
+      {% endfor %}
+      <p class="meta">Blocked: stuck, someone else must act.</p>
+    </fieldset>
+    <label>What changed
+      <textarea name="text" rows="4" maxlength="4000">{{ text_value }}</textarea>
+    </label>
+    <p class="meta">{% if owner.id != me.id %}Posted for {{ owner.display_name }}. {% endif %}Everyone signed in to the board can read it.</p>
+    <button class="primary" type="submit">Send</button>
+  </form>
+{% endif %}
+</div>
+{% endblock %}
