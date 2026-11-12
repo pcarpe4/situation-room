@@ -187,7 +187,36 @@ table.roster th, table.roster td { text-align: left; padding: 0.5rem; border-bot
 table.roster tr.inactive td { color: var(--muted); }
 table.roster form { margin: 0; }
 
+.cal-head { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; align-items: center; justify-content: space-between; }
+.cal-head h1 { margin: 0.5rem 0; }
+.cal-nav { display: flex; gap: 0.4rem; }
+.cal { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--surface); }
+.cal-row { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.cal-row + .cal-row { border-top: 1px solid var(--line); }
+.cal-weekdays div { padding: 0.35rem 0.5rem; font-size: 0.8rem; font-weight: 600; color: var(--muted); }
+.cal-day { min-height: 6.5rem; padding: 0.35rem 0.45rem; border-left: 1px solid var(--line); min-width: 0; }
+.cal-day:first-child { border-left: 0; }
+.cal-day.outside { background: var(--bg); color: var(--muted); }
+.cal-day.today { box-shadow: inset 0 0 0 2px var(--accent); }
+.cal-date { display: flex; gap: 0.3rem; align-items: center; justify-content: flex-end; font-size: 0.85rem; }
+.cal-day.today time { font-weight: 700; }
+.cal-dow { display: none; }
+.cal-items { list-style: none; margin: 0.2rem 0 0; padding: 0; display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.85rem; }
+.cal-items li { overflow-wrap: anywhere; line-height: 1.3; }
+.cal-due { padding-left: 0.35rem; border-left: 3px solid var(--accent); }
+.cal-due.is-overdue { border-left-color: var(--action); }
+.cal-due a { color: var(--text); font-weight: 600; margin-right: 0.25rem; }
+.cal-wait { padding-left: 0.35rem; border-left: 3px dashed var(--line); }
+.cal-wait .meta { display: block; }
+
 @media (max-width: 720px) {
+  .cal-weekdays { display: none; }
+  .cal-row { grid-template-columns: 1fr; }
+  .cal-row + .cal-row { border-top: 0; }
+  .cal-day { min-height: 0; border-left: 0; border-top: 1px solid var(--line); }
+  .cal-day.quiet-day, .cal-day.outside { display: none; }
+  .cal-date { justify-content: flex-start; font-weight: 600; }
+  .cal-dow { display: inline; }
   .line { grid-template-columns: 1fr; gap: 0.35rem; }
   .ask { justify-content: flex-start; }
   .two { grid-template-columns: 1fr; }

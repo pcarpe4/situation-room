@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Calendar · Situation Room{% endblock %}
+{% block content %}
+{% set m = cal.month %}
+<div class="cal-head">
+  <h1>{{ m.strftime('%B %Y') }}</h1>
+  <nav class="cal-nav" aria-label="Month">
+    <a class="button quiet" href="/calendar?month={{ cal.prev_month.strftime('%Y-%m') }}" rel="prev">← {{ cal.prev_month.strftime('%b') }}</a>
+    {% if not cal.is_current %}<a class="button quiet" href="/calendar">This month</a>{% endif %}
+    <a class="button quiet" href="/calendar?month={{ cal.next_month.strftime('%Y-%m') }}" rel="next">{{ cal.next_month.strftime('%b') }} →</a>
+  </nav>
+</div>
+<p class="result">{{ cal.due_count }} open {{ 'firedrill' if cal.due_count == 1 else 'firedrills' }} due in {{ m.strftime('%B') }}</p>
+
+<div class="cal" role="table" aria-label="{{ m.strftime('%B %Y') }}">
+  <div class="cal-row cal-weekdays" role="row">
+    {% for name in ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] %}<div role="columnheader">{{ name }}</div>{% endfor %}
+  </div>
+  {% for week in cal.weeks %}
+  <div class="cal-row" role="row">
+    {% for cell in week %}
+    <div role="cell" class="cal-day{% if not cell.in_month %} outside{% endif %}{% if cell.is_today %} today{% endif %}{% if not cell.due and not cell.waits %} quiet-day{% endif %}">
+      <div class="cal-date">
+        {% if cell.is_today %}<span class="badge changed">Today</span>{% endif %}
+        <time datetime="{{ cell.day.isoformat() }}"><span class="cal-dow">{{ cell.day.strftime('%a') }} </span>{{ cell.day.day }}</time>
+      </div>
+      <ul class="cal-items">
+        {% for row in cell.due %}
+        <li class="cal-due{% if row.overdue_days %} is-overdue{% endif %}">
+          <a href="/f/{{ row.public_id }}">{{ row.title }}</a>
+          {% if row.ready_to_close %}<span class="badge changed">Ready to close</span>
+          {% elif row.overdue_days %}<span class="badge action">Overdue {{ row.overdue_days }}d</span>
+          {% else %}<span class="badge status-{{ row.rollup.value }}">{{ status_label(row.rollup) }}</span>{% endif %}
+          {% if row.stale %}<span class="badge action">Stale</span>{% endif %}
+        </li>
+        {% endfor %}
+        {% for w in cell.waits %}
+        <li class="cal-wait"><a href="/f/{{ w.firedrill_id }}#a-{{ w.assignment_id }}">{{ w.owner_name }}'s wait ends</a> <span class="meta">{{ w.title }}</span></li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endfor %}
+  </div>
+  {% endfor %}
+</div>
+
+{% if cal.undated %}
+<h2>No due date</h2>
+<ul class="plain">
+  {% for row in cal.undated %}<li><a href="/f/{{ row.public_id }}">{{ row.title }}</a> {% if row.ready_to_close %}<span class="badge changed">Ready to close</span>{% else %}<span class="badge status-{{ row.rollup.value }}">{{ status_label(row.rollup) }}</span>{% endif %}</li>{% endfor %}
+</ul>
+{% endif %}
+{% endblock %}

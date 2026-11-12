@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import calendar as stdcal
 import enum
 import uuid
 from dataclasses import dataclass, field
@@ -323,3 +324,75 @@ def one(s: Session, clock: Clock, stale_after: int, viewer: Person, public_id: u
 
 def _plural(n: int, word: str) -> str:
     return word if n == 1 else word + "s"
+
+
+# Calendar ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class WaitEnd:
+    """An owner's wait that runs through this day."""
+
+    firedrill_id: uuid.UUID
+    title: str
+    owner_name: str
+    assignment_id: uuid.UUID
+
+
+@dataclass
+class CalendarDay:
+    day: date
+    in_month: bool
+    is_today: bool
+    due: list[Row] = field(default_factory=list)
+    waits: list[WaitEnd] = field(default_factory=list)
+
+
+@dataclass
+class CalendarMonth:
+    month: date  # the first of the month shown
+    weeks: list[list[CalendarDay]]
+    prev_month: date
+    next_month: date
+    is_current: bool
+    due_count: int  # open firedrills due in this month
+    undated: list[Row]  # open firedrills with no due date
+
+
+def parse_month(value: str | None, today: date) -> date:
+    """The first of a `YYYY-MM` month, or of today's month when the value is missing or bad."""
+    try:
+        year, month = (int(part) for part in (value or "").split("-"))
+        return date(year, month, 1)
+    except ValueError:
+        return today.replace(day=1)
+
+
+def _shift_month(first: date, delta: int) -> date:
+    index = first.year * 12 + first.month - 1 + delta
+    return date(index // 12, index % 12 + 1, 1)
+
+
+def calendar(s: Session, clock: Clock, stale_after: int, viewer: Person, month: date) -> CalendarMonth:
+    """Open firedrills by due date, and owners' waits by their last day, on a Monday-first month grid."""
+    today = clock.today()
+    first = month.replace(day=1)
+    rows = _load(s, clock, stale_after, viewer)
+    weeks = [
+        [CalendarDay(day=d, in_month=d.month == first.month, is_today=d == today) for d in week]
+        for week in stdcal.Calendar(firstweekday=0).monthdatescalendar(first.year, first.month)
+    ]
+    cells = {cell.day: cell for week in weeks for cell in week}
+    for row in sorted(rows, key=lambda r: (ROLLUP_ORDER.index(r.rollup), r.title.lower())):
+        if row.due_date in cells:
+            cells[row.due_date].due.append(row)
+        for line in row.lines:
+            if line.waiting and line.waiting_until in cells:
+                cells[line.waiting_until].waits.append(
+                    WaitEnd(row.public_id, row.title, line.owner_name, line.assignment_id))
+    return CalendarMonth(
+        month=first, weeks=weeks, prev_month=_shift_month(first, -1), next_month=_shift_month(first, 1),
+        is_current=first == today.replace(day=1),
+        due_count=sum(r.due_date is not None and (r.due_date.year, r.due_date.month) == (first.year, first.month)
+                      for r in rows),
+        undated=[r for r in rows if r.due_date is None],
+    )
