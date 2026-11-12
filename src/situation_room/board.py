@@ -97,6 +97,8 @@ def rollup(statuses: list[Status]) -> Status:
 def _load(s: Session, clock: Clock, stale_after: int, owner_id: int | None = None,
           public_id: uuid.UUID | None = None) -> list[Row]:
     today = clock.today()
+    # No holidays are configured yet; when they are, they go in here.
+    rules = dates.StaleRules(tz=clock.tz, stale_after=stale_after)
     query = select(Firedrill).where(Firedrill.state == FiredrillState.OPEN)
     if public_id is not None:
         query = query.where(Firedrill.public_id == public_id)
@@ -141,18 +143,14 @@ def _load(s: Session, clock: Clock, stale_after: int, owner_id: int | None = Non
 
     for a, person in assignments:
         u = latest.get(a.id)
-        created = clock.local(a.created_at).date()
-        newest = clock.local(u.created_at).date() if u else None
-        waiting = dates.is_waiting(a.waiting_until, today)
         active = a.status != Status.DONE
-        start = dates.clock_start(created, newest, a.waiting_until, today)
-        stale = active and not waiting and dates.is_stale(start, today, stale_after)
+        state = dates.staleness(created_at=a.created_at, newest_update_at=u.created_at if u else None,
+                                waiting_until=a.waiting_until, done=not active, today=today, rules=rules)
         rows[a.firedrill_id].lines.append(OwnerLine(
             assignment_id=a.public_id, owner_id=person.id, owner_name=person.display_name, owner_email=person.email,
             assigned_at=a.created_at, status=a.status, last_update_text=u.text if u else None, last_update_at=u.created_at if u else None,
             last_update_posted_for=bool(u and u.on_behalf_of_id), waiting_until=a.waiting_until,
-            waiting_reason=a.waiting_reason, waiting=waiting and active, stale=stale,
-            stale_days=dates.stale_working_days(start, today) if stale else 0,
+            waiting_reason=a.waiting_reason, waiting=state.waiting, stale=state.stale, stale_days=state.stale_days,
             open_ask=asks.get(a.id) if active else None,
         ))
 

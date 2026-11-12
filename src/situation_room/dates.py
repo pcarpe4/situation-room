@@ -7,7 +7,8 @@ Friday, minus any listed non-working dates.
 from __future__ import annotations
 
 from collections.abc import Collection
-from datetime import date, timedelta
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta, tzinfo
 
 NO_DATES: frozenset[date] = frozenset()
 
@@ -27,33 +28,44 @@ def working_days_after(start: date, end: date, non_working: Collection[date] = N
     return count
 
 
-def is_waiting(waiting_until: date | None, today: date) -> bool:
-    """An assignment waits through the waiting_until date itself."""
-    return waiting_until is not None and today <= waiting_until
+@dataclass(frozen=True)
+class StaleRules:
+    """What the stale rule needs besides the assignment: the app's time zone, the
+    number of working days an owner gets (SR_STALE_AFTER) and any non-working dates."""
+
+    tz: tzinfo
+    stale_after: int
+    non_working: frozenset[date] = NO_DATES
 
 
-def clock_start(created: date, newest_update: date | None, waiting_until: date | None, today: date) -> date:
-    """The date the stale clock counts from.
+@dataclass(frozen=True)
+class Staleness:
+    waiting: bool
+    stale: bool
+    stale_days: int  # working days since `clock_start`; 0 unless stale
+    clock_start: date
 
-    It is the newest update (or the assignment's creation), moved forward to
-    the end of a wait once that wait is over.
+
+def staleness(
+    *, created_at: datetime, newest_update_at: datetime | None, waiting_until: date | None,
+    done: bool, today: date, rules: StaleRules,
+) -> Staleness:
+    """Whether an assignment is waiting or stale today. The one place that decides it.
+
+    - Timestamps become calendar dates in the app's time zone.
+    - The clock counts from the newest update, or from when it was assigned. Once a
+      wait is over, it counts from the wait's last day if that is later.
+    - A wait runs through its date. A waiting or done assignment is never stale.
+    - Stale from working day N+1 after the clock start: with N=3, an update on
+      Monday makes the assignment stale on Friday morning.
     """
-    start = newest_update or created
+    start = (newest_update_at or created_at).astimezone(rules.tz).date()
     if waiting_until is not None and waiting_until < today:
         start = max(start, waiting_until)
-    return start
-
-
-def stale_working_days(start: date, today: date, non_working: Collection[date] = NO_DATES) -> int:
-    return working_days_after(start, today, non_working)
-
-
-def is_stale(start: date, today: date, stale_after: int, non_working: Collection[date] = NO_DATES) -> bool:
-    """Stale from the start of working day N+1 after the clock start.
-
-    With N=3, an update on Monday makes the assignment stale on Friday morning.
-    """
-    return working_days_after(start, today, non_working) >= stale_after + 1
+    waiting = not done and waiting_until is not None and today <= waiting_until
+    days = working_days_after(start, today, rules.non_working)
+    stale = not done and not waiting and days >= rules.stale_after + 1
+    return Staleness(waiting=waiting, stale=stale, stale_days=days if stale else 0, clock_start=start)
 
 
 def overdue_days(due: date | None, today: date) -> int:
