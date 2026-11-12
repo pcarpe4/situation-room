@@ -6,10 +6,22 @@ from fastapi.templating import Jinja2Templates
 
 from .security import csrf_token
 
+THEME_COOKIE = "sr_theme"
+THEMES = ("light", "dark", "system")
+
+
+def theme_of(request: Request) -> str:
+    value = request.cookies.get(THEME_COOKIE)
+    return value if value in ("light", "dark") else "system"
+
 
 def render(request: Request, name: str, status_code: int = 200, **context: object) -> HTMLResponse:
     templates: Jinja2Templates = request.app.state.templates
     context.setdefault("me", getattr(request.state, "person", None))
     context["cfg"] = request.app.state.cfg
     context["csrf_token"] = csrf_token(request)
+    context["theme"] = theme_of(request)
+    # Where the theme form returns to: this page, unless it was the result of a POST.
+    url = request.url
+    context["here"] = (url.path + (f"?{url.query}" if url.query else "")) if request.method == "GET" else "/"
     return templates.TemplateResponse(request, name, context, status_code=status_code)

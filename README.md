@@ -77,6 +77,7 @@ Read from the environment at start. A missing or invalid key stops the app with 
 - Request update: records the ask and opens a prefilled email with four status links; "Sent it?" Yes or Cancel
 - Update form from a status link or the Update button; a repeated Send makes one update; an update answers every open ask; a Lead can post for an owner
 - Firedrill page with the full update history
+- Light, dark or system theme from the header, remembered per browser
 - Security headers with no inline script, request-forgery tokens on every form, an outage page (503) when the database is down
 
 Not built yet: OIDC and proxy sign-in, paste intake with drafted fields, Needs you, Seen by, close and reopen, reassigning owners, setting a wait from the UI, the Health page and the mail features.

@@ -1,4 +1,5 @@
 :root {
+  color-scheme: light;
   --bg: #f6f7f9;
   --surface: #ffffff;
   --text: #1b1f24;
@@ -15,8 +16,10 @@
   --radius: 6px;
 }
 
+/* Dark: when the device asks for it and the person has not picked Light, or when they picked Dark. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
     --bg: #14171b;
     --surface: #1c2026;
     --text: #e8ebef;
@@ -31,6 +34,23 @@
     --info-bg: #262c34;
     --warn-bg: #3a3218;
   }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #14171b;
+  --surface: #1c2026;
+  --text: #e8ebef;
+  --muted: #a3acb8;
+  --line: #333a44;
+  --accent: #6ea2f0;
+  --accent-text: #0d1117;
+  --action: #ff8a7f;
+  --action-bg: #3a1d1b;
+  --changed: #7fd69c;
+  --changed-bg: #17301f;
+  --info-bg: #262c34;
+  --warn-bg: #3a3218;
 }
 
 * { box-sizing: border-box; }
@@ -55,7 +75,13 @@ code { font-size: 0.9em; }
 .top nav { display: flex; gap: 1rem; flex-wrap: wrap; }
 .top nav a { text-decoration: none; }
 .top nav a[aria-current="page"] { font-weight: 700; text-decoration: underline; }
-.who { margin-left: auto; display: flex; gap: 0.5rem; align-items: center; color: var(--muted); font-size: 0.9rem; }
+.tools { margin-left: auto; display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; align-items: center; }
+.who { display: flex; gap: 0.5rem; align-items: center; color: var(--muted); font-size: 0.9rem; margin: 0; }
+.theme { display: flex; gap: 0.4rem; align-items: center; margin: 0; color: var(--muted); font-size: 0.85rem; }
+.segmented { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.segmented button { border: 0; border-radius: 0; min-height: 32px; padding: 0.2rem 0.6rem; font-size: 0.85rem; background: transparent; color: var(--muted); }
+.segmented button + button { border-left: 1px solid var(--line); }
+.segmented button[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); font-weight: 600; }
 
 main { max-width: 1100px; margin: 0 auto; padding: 1rem; }
 .narrow { max-width: 640px; }
@@ -165,7 +191,8 @@ table.roster form { margin: 0; }
   .line { grid-template-columns: 1fr; gap: 0.35rem; }
   .ask { justify-content: flex-start; }
   .two { grid-template-columns: 1fr; }
-  .who { margin-left: 0; }
+  .tools { margin-left: 0; }
+  .segmented button { min-height: 44px; }
   table.roster { display: block; overflow-x: auto; }
   button, .button { min-height: 44px; }
 }

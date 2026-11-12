@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en"{% if theme != 'system' %} data-theme="{{ theme }}"{% endif %}>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -11,18 +11,32 @@
   <header class="top">
     <a class="brand" href="/">Situation Room</a>
     {% if me %}
-    <nav>
+    <nav aria-label="Main">
       <a href="/mine" {% if tab == 'mine' %}aria-current="page"{% endif %}>My assignments</a>
       <a href="/board" {% if tab == 'board' %}aria-current="page"{% endif %}>Board</a>
       {% if me.role.value in ('lead', 'triage') %}<a href="/firedrills/new">New firedrill</a>{% endif %}
       {% if me.role.value == 'triage' %}<a href="/roster" {% if tab == 'roster' %}aria-current="page"{% endif %}>Roster</a>{% endif %}
     </nav>
-    <form method="post" action="/signout" class="who">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <span>{{ me.display_name }} · {{ me.role.value|capitalize }}</span>
-      <button class="quiet" type="submit">Sign out</button>
-    </form>
     {% endif %}
+    <div class="tools">
+      <form method="post" action="/theme" class="theme">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="back" value="{{ here }}">
+        <span class="theme-label" id="theme-label">Theme</span>
+        <span class="segmented" role="group" aria-labelledby="theme-label">
+        {%- for value, label in [('light', 'Light'), ('dark', 'Dark'), ('system', 'System')] %}
+          <button type="submit" name="theme" value="{{ value }}" aria-pressed="{{ 'true' if theme == value else 'false' }}">{{ label }}</button>
+        {%- endfor %}
+        </span>
+      </form>
+      {% if me %}
+      <form method="post" action="/signout" class="who">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <span>{{ me.display_name }} · {{ me.role.value|capitalize }}</span>
+        <button class="quiet" type="submit">Sign out</button>
+      </form>
+      {% endif %}
+    </div>
   </header>
   <main>
     {% block content %}{% endblock %}

@@ -15,7 +15,7 @@ from .. import board as board_mod
 from .. import domain, mailto
 from ..models import Assignment, Firedrill, FiredrillState, Person, Role, Status, Update, UpdateRequest
 from ..policy import Action, can
-from .render import render
+from .render import THEME_COOKIE, THEMES, render
 from .security import Refused, current_person, get_db, safe_next
 
 router = APIRouter()
@@ -75,6 +75,18 @@ def signin_dev(request: Request, person_id: int = Form(...), next: str = Form("/
 def signout(request: Request):
     request.session.clear()
     return _see_other("/signin")
+
+
+@router.post("/theme")
+def set_theme(request: Request, theme: str = Form("system"), back: str = Form("/")):
+    """Light, dark or follow the device. Kept in its own cookie so it outlives sign-out."""
+    response = _see_other(safe_next(back, "/"))
+    if theme in THEMES and theme != "system":
+        response.set_cookie(THEME_COOKIE, theme, max_age=400 * 24 * 3600, httponly=True, samesite="lax",
+                            secure=_cfg(request).public_url.startswith("https://"))
+    else:
+        response.delete_cookie(THEME_COOKIE)
+    return response
 
 
 # Board ------------------------------------------------------------------------------

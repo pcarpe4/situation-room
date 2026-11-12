@@ -153,3 +153,40 @@ def test_the_database_being_down_shows_the_outage_page(cfg, clock):
     assert r.status_code == 503
     assert r.headers["retry-after"] == "30"
     assert "unavailable" in r.text
+
+
+def test_theme_defaults_to_system(client):
+    html = client.get("/signin").text
+    assert "data-theme" not in html.split("<head>")[0]
+    assert 'name="theme" value="system" aria-pressed="true"' in html
+
+
+def test_theme_choice_applies_to_every_page_and_survives_sign_out(client, people):
+    token = csrf_from(client.get("/signin").text)
+    r = client.post("/theme", data={"theme": "dark", "back": "/signin", "csrf_token": token}, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/signin"
+    assert '<html lang="en" data-theme="dark">' in client.get("/signin").text
+
+    token = sign_in(client, people.lead)
+    board = client.get("/board").text
+    assert '<html lang="en" data-theme="dark">' in board
+    assert 'name="theme" value="dark" aria-pressed="true"' in board
+    client.post("/signout", data={"csrf_token": token})
+    assert '<html lang="en" data-theme="dark">' in client.get("/signin").text
+
+
+def test_theme_light_then_back_to_system(client):
+    token = csrf_from(client.get("/signin").text)
+    client.post("/theme", data={"theme": "light", "back": "/signin", "csrf_token": token})
+    assert '<html lang="en" data-theme="light">' in client.get("/signin").text
+    client.post("/theme", data={"theme": "system", "back": "/signin", "csrf_token": token})
+    html = client.get("/signin").text
+    assert "data-theme" not in html.split("<head>")[0]
+
+
+def test_theme_refuses_odd_values_and_offsite_back_links(client):
+    token = csrf_from(client.get("/signin").text)
+    r = client.post("/theme", data={"theme": "neon", "back": "//evil.example", "csrf_token": token},
+                    follow_redirects=False)
+    assert r.headers["location"] == "/"
+    assert "data-theme" not in client.get("/signin").text.split("<head>")[0]
