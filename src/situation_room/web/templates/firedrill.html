@@ -34,7 +34,7 @@
       <strong>{{ owner.display_name }}</strong>
       {% if upd.status %}{{ status_badge(upd.status) }}{% endif %}
       {% if upd.on_behalf_of_id %}<span class="badge info">posted for, by {{ authors[upd.author_id].display_name }}</span>{% endif %}
-      {% if assignment.ended_at %}<span class="badge info">former owner</span>{% endif %}
+      {% if not assignment.is_active %}<span class="badge info">former owner</span>{% endif %}
     </div>
     <p class="update-text">{{ upd.text or "(no text)" }}</p>
     <p class="meta" title="{{ upd.created_at|exact }}">{{ upd.created_at|ago }}</p>

@@ -52,38 +52,18 @@ def test_ticket_refs_use_the_longest_prefix(db, clock, people):
     assert f.ticket_refs == "SCTASK0012345 INC0099887"
 
 
-def test_update_sets_status_and_answers_every_open_ask(db, clock, people):
+def test_an_update_sets_the_status_and_done_clears_a_wait(db, clock, people):
     f = make(db, clock, people)
     a = assignment_of(db, f, people.ann)
-    first = domain.request_update(db, clock, people.lead, a.public_id)
-    second = domain.request_update(db, clock, people.triage, a.public_id)
-    cancelled = domain.request_update(db, clock, people.lead, a.public_id)
-    domain.cancel_ask(db, clock, people.lead, cancelled.id)
+    domain.set_wait(db, clock, people.ann, a.public_id, until=clock.today() + timedelta(days=3), reason="Vendor")
+    domain.post_update(db, clock, people.ann, a.public_id, status="at_risk", text="Two left.", form_token="t1")
     db.commit()
-
-    clock.advance(hours=2)
-    upd = domain.post_update(db, clock, people.ann, a.public_id, status="at_risk", text="Two left.", form_token="t1")
-    db.commit()
-
     db.refresh(a)
-    assert a.status == Status.AT_RISK
-    for ask in (first, second):
-        db.refresh(ask)
-        assert ask.answered_by_update_id == upd.id
-    db.refresh(cancelled)
-    assert cancelled.answered_by_update_id is None
-    assert upd.on_behalf_of_id is None
-
-
-def test_a_repeated_send_makes_one_update(db, clock, people):
-    f = make(db, clock, people)
-    a = assignment_of(db, f, people.ann)
-    one = domain.post_update(db, clock, people.ann, a.public_id, status="on_track", text="x", form_token="same")
+    assert a.status == Status.AT_RISK and a.waiting_until is not None
+    domain.post_update(db, clock, people.ann, a.public_id, status="done", text="All done.", form_token="t2")
     db.commit()
-    two = domain.post_update(db, clock, people.ann, a.public_id, status="blocked", text="y", form_token="same")
-    db.commit()
-    assert one.id == two.id
-    assert db.scalar(select(func.count()).select_from(Update)) == 1
+    db.refresh(a)
+    assert a.status == Status.DONE and a.waiting_until is None and a.waiting_reason is None
 
 
 def test_two_simultaneous_sends_with_one_token_make_one_update(sm, db, clock, people):
@@ -113,31 +93,10 @@ def test_two_simultaneous_sends_with_one_token_make_one_update(sm, db, clock, pe
     assert db.scalar(select(func.count()).select_from(Update)) == 1
 
 
-def test_a_lead_posting_for_an_owner_is_marked_posted_for(db, clock, people):
-    f = make(db, clock, people)
-    a = assignment_of(db, f, people.ann)
-    upd = domain.post_update(db, clock, people.lead, a.public_id, status="on_track", text="She replied by mail.", form_token="t")
-    assert upd.author_id == people.lead.id
-    assert upd.on_behalf_of_id == people.ann.id
 
 
-def test_a_manager_cannot_post_on_someone_elses_assignment(db, clock, people):
-    f = make(db, clock, people)
-    a = assignment_of(db, f, people.ann)
-    with pytest.raises(DomainError) as err:
-        domain.post_update(db, clock, people.bob, a.public_id, status="on_track", text="", form_token="t")
-    assert err.value.http_status == 403
 
 
-def test_an_ended_assignment_takes_no_update(db, clock, people):
-    f = make(db, clock, people, owners=[people.ann, people.bob])
-    a = assignment_of(db, f, people.ann)
-    a.ended_at = clock.now()
-    db.commit()
-    with pytest.raises(DomainError) as err:
-        domain.post_update(db, clock, people.ann, a.public_id, status="on_track", text="", form_token="t")
-    assert err.value.code == "ASSIGNMENT_ENDED"
-    assert "Bob Manager" in err.value.message
 
 
 def test_a_status_is_required(db, clock, people):

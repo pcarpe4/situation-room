@@ -11,6 +11,8 @@ interleaving.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import date
 
 from sqlalchemy import func, select, update
@@ -101,7 +103,7 @@ def deactivate_person(s: Session, clock: Clock, actor: Person, person_id: int) -
         return person
     active_work = s.scalar(
         select(func.count()).select_from(Assignment).join(Firedrill)
-        .where(Assignment.owner_id == person.id, Assignment.ended_at.is_(None),
+        .where(Assignment.owner_id == person.id, Assignment.is_active,
                Assignment.status != Status.DONE, Firedrill.state == FiredrillState.OPEN)
     )
     if active_work:
@@ -177,6 +179,7 @@ def create_firedrill(
 # Assignments --------------------------------------------------------------------
 
 def _lock_assignment(s: Session, public_id: uuid.UUID) -> tuple[Firedrill, Assignment]:
+    """Lock the firedrill row, then the assignment row. Every assignment event takes this order."""
     firedrill_id = s.scalar(select(Assignment.firedrill_id).where(Assignment.public_id == public_id))
     if firedrill_id is None:
         raise DomainError("NOT_FOUND", "No such assignment.", 404)
@@ -189,110 +192,133 @@ def _lock_assignment(s: Session, public_id: uuid.UUID) -> tuple[Firedrill, Assig
     return firedrill, assignment
 
 
-def _require_open(firedrill: Firedrill, assignment: Assignment, s: Session) -> None:
+def _require_open(s: Session, firedrill: Firedrill, assignment: Assignment) -> None:
     if firedrill.state != FiredrillState.OPEN:
         raise DomainError("FIREDRILL_CLOSED", "This firedrill is closed.")
-    if assignment.ended_at is not None:
+    if not assignment.is_active:
         current = s.scalars(
             select(Person).join(Assignment, Assignment.owner_id == Person.id)
-            .where(Assignment.firedrill_id == firedrill.id, Assignment.ended_at.is_(None))
+            .where(Assignment.firedrill_id == firedrill.id, Assignment.is_active)
         ).all()
         names = ", ".join(p.display_name for p in current) or "nobody"
         raise DomainError("ASSIGNMENT_ENDED", f"This assignment has ended. It now belongs to {names}.")
 
 
-def post_update(
-    s: Session, clock: Clock, actor: Person, assignment_public_id: uuid.UUID, *,
-    status: Status | str, text: str, form_token: str,
+def _open_assignment(s: Session, actor: Person, action: Action, public_id: uuid.UUID) -> tuple[Firedrill, Assignment]:
+    """Lock, check permission, then check the firedrill and assignment are still open."""
+    firedrill, assignment = _lock_assignment(s, public_id)
+    _require(actor, action, assignment)
+    _require_open(s, firedrill, assignment)
+    return firedrill, assignment
+
+
+@dataclass(frozen=True)
+class _Event:
+    """What one kind of event writes: the update row's status and text, and its effect on the assignment."""
+
+    status: Status | None
+    text: str
+    audit_action: str
+    apply: Callable[[Assignment], None]
+    audit_detail: dict[str, object] = field(default_factory=dict)
+
+
+def _record_event(
+    s: Session, clock: Clock, actor: Person, public_id: uuid.UUID, *,
+    form_token: str, build: Callable[[Assignment], _Event],
 ) -> Update:
-    """Post an update on one assignment.
+    """The one path for an event that posts an update on an assignment.
 
-    The form token makes a repeated Send return the first update instead of
-    making a second one. The update answers every open ask on the assignment.
+    Order: lock (firedrill, then assignment), permission, form-token replay, open check,
+    then `build` validates and describes the event. The update is written, its effect
+    applied, every open ask on the assignment answered and an audit row written.
+    A replayed form token returns the first update, even if the firedrill has since closed.
     """
-    firedrill, assignment = _lock_assignment(s, assignment_public_id)
+    firedrill, assignment = _lock_assignment(s, public_id)
     _require(actor, Action.POST_UPDATE, assignment)
-
     if form_token:
         existing = s.scalar(select(Update).where(Update.form_token == form_token))
         if existing is not None:
             if existing.assignment_id != assignment.id:
                 raise DomainError("FORM_TOKEN_REUSED", "This form was already used. Reload and try again.", 400)
             return existing
-
-    _require_open(firedrill, assignment, s)
-    try:
-        new_status = Status(status)
-    except ValueError:
-        raise DomainError("STATUS_REQUIRED", "Pick a status.", 400) from None
-    if new_status == Status.NEW:
-        raise DomainError("STATUS_REQUIRED", "Pick a status.", 400)
-    text = (text or "").strip()
-    if len(text) > UPDATE_TEXT_MAX:
-        raise DomainError("FIELD_TOO_LONG", f"Updates are limited to {UPDATE_TEXT_MAX} characters.", 400)
+    _require_open(s, firedrill, assignment)
+    event = build(assignment)
 
     upd = Update(
         assignment_id=assignment.id, author_id=actor.id,
         on_behalf_of_id=None if actor.id == assignment.owner_id else assignment.owner_id,
-        status=new_status, text=text, source="form", form_token=form_token or None, created_at=clock.now(),
+        status=event.status, text=event.text, source="form", form_token=form_token or None, created_at=clock.now(),
     )
     s.add(upd)
     s.flush()
-    assignment.status = new_status
-    if new_status == Status.DONE:
-        assignment.waiting_until = None
-        assignment.waiting_reason = None
+    event.apply(assignment)
     s.execute(
         update(UpdateRequest)
-        .where(UpdateRequest.assignment_id == assignment.id,
-               UpdateRequest.answered_by_update_id.is_(None), UpdateRequest.cancelled_at.is_(None))
+        .where(UpdateRequest.assignment_id == assignment.id, UpdateRequest.is_open)
         .values(answered_by_update_id=upd.id)
     )
-    _audit(s, clock, actor, "update.post", "assignment", assignment.public_id,
-           status=new_status.value, on_behalf=upd.on_behalf_of_id is not None)
+    _audit(s, clock, actor, event.audit_action, "assignment", assignment.public_id,
+           on_behalf=upd.on_behalf_of_id is not None, **event.audit_detail)
     return upd
+
+
+def post_update(
+    s: Session, clock: Clock, actor: Person, assignment_public_id: uuid.UUID, *,
+    status: Status | str, text: str, form_token: str,
+) -> Update:
+    """Post an update with a status. A repeated Send returns the first update."""
+
+    def build(assignment: Assignment) -> _Event:
+        try:
+            new_status = Status(status)
+        except ValueError:
+            raise DomainError("STATUS_REQUIRED", "Pick a status.", 400) from None
+        if new_status == Status.NEW:
+            raise DomainError("STATUS_REQUIRED", "Pick a status.", 400)
+        body = (text or "").strip()
+        if len(body) > UPDATE_TEXT_MAX:
+            raise DomainError("FIELD_TOO_LONG", f"Updates are limited to {UPDATE_TEXT_MAX} characters.", 400)
+
+        def apply(a: Assignment) -> None:
+            a.status = new_status
+            if new_status == Status.DONE:
+                a.waiting_until = None
+                a.waiting_reason = None
+
+        return _Event(new_status, body, "update.post", apply, {"status": new_status.value})
+
+    return _record_event(s, clock, actor, assignment_public_id, form_token=form_token, build=build)
 
 
 def set_wait(
     s: Session, clock: Clock, actor: Person, assignment_public_id: uuid.UUID, *,
     until: date, reason: str, form_token: str = "",
 ) -> Update:
-    """Pause the stale clock through `until`. Recorded as an update whose text is the reason,
-    so it answers open asks like any other update."""
-    firedrill, assignment = _lock_assignment(s, assignment_public_id)
-    _require(actor, Action.POST_UPDATE, assignment)
-    _require_open(firedrill, assignment, s)
-    if assignment.status == Status.DONE:
-        raise DomainError("ASSIGNMENT_DONE", "This assignment is done, so it cannot wait.")
-    reason = " ".join((reason or "").split())
-    if not reason:
-        raise DomainError("FIELD_REQUIRED", "Say what you are waiting for.", 400)
-    if until <= clock.today():
-        raise DomainError("FIELD_INVALID", "The waiting date must be in the future.", 400)
-    upd = Update(
-        assignment_id=assignment.id, author_id=actor.id,
-        on_behalf_of_id=None if actor.id == assignment.owner_id else assignment.owner_id,
-        status=None, text=reason, source="form", form_token=form_token or None, created_at=clock.now(),
-    )
-    s.add(upd)
-    s.flush()
-    assignment.waiting_until = until
-    assignment.waiting_reason = reason
-    s.execute(
-        update(UpdateRequest)
-        .where(UpdateRequest.assignment_id == assignment.id,
-               UpdateRequest.answered_by_update_id.is_(None), UpdateRequest.cancelled_at.is_(None))
-        .values(answered_by_update_id=upd.id)
-    )
-    _audit(s, clock, actor, "wait.set", "assignment", assignment.public_id, until=until.isoformat())
-    return upd
+    """Pause the stale clock through `until`. Recorded as a status-less update whose text is
+    the reason, so it answers open asks like any other update."""
+
+    def build(assignment: Assignment) -> _Event:
+        if assignment.status == Status.DONE:
+            raise DomainError("ASSIGNMENT_DONE", "This assignment is done, so it cannot wait.")
+        why = " ".join((reason or "").split())
+        if not why:
+            raise DomainError("FIELD_REQUIRED", "Say what you are waiting for.", 400)
+        if until <= clock.today():
+            raise DomainError("FIELD_INVALID", "The waiting date must be in the future.", 400)
+
+        def apply(a: Assignment) -> None:
+            a.waiting_until = until
+            a.waiting_reason = why
+
+        return _Event(None, why, "wait.set", apply, {"until": until.isoformat()})
+
+    return _record_event(s, clock, actor, assignment_public_id, form_token=form_token, build=build)
 
 
 def request_update(s: Session, clock: Clock, actor: Person, assignment_public_id: uuid.UUID) -> UpdateRequest:
     """Record an ask. Always creates a new one, even while another is open."""
-    _require(actor, Action.REQUEST_UPDATE)
-    firedrill, assignment = _lock_assignment(s, assignment_public_id)
-    _require_open(firedrill, assignment, s)
+    _, assignment = _open_assignment(s, actor, Action.REQUEST_UPDATE, assignment_public_id)
     if assignment.status == Status.DONE:
         raise DomainError("ASSIGNMENT_DONE", "This assignment is done, so there is nothing to ask.")
     ask = UpdateRequest(assignment_id=assignment.id, asked_by_id=actor.id, origin="manual", requested_at=clock.now())
@@ -312,7 +338,7 @@ def _lock_ask(s: Session, actor: Person, ask_id: int) -> UpdateRequest:
 
 def confirm_ask_sent(s: Session, clock: Clock, actor: Person, ask_id: int) -> UpdateRequest:
     ask = _lock_ask(s, actor, ask_id)
-    if ask.confirmed_sent_at is None and ask.cancelled_at is None:
+    if ask.confirmed_sent_at is None and ask.is_open:
         ask.confirmed_sent_at = clock.now()
         _audit(s, clock, actor, "ask.confirm_sent", "update_request", ask.id)
     return ask
@@ -322,7 +348,7 @@ def cancel_ask(s: Session, clock: Clock, actor: Person, ask_id: int, reason: str
     ask = _lock_ask(s, actor, ask_id)
     if ask.answered_by_update_id is not None:
         raise DomainError("ASK_ANSWERED", "That ask was already answered.")
-    if ask.cancelled_at is None:
+    if ask.is_open:
         ask.cancelled_at = clock.now()
         ask.cancel_reason = reason
         _audit(s, clock, actor, "ask.cancel", "update_request", ask.id, reason=reason)

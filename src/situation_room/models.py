@@ -10,6 +10,7 @@ import uuid
 from datetime import date, datetime
 
 from sqlalchemy import (
+    and_,
     BigInteger,
     CheckConstraint,
     Date,
@@ -24,6 +25,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 NAMING = {
@@ -118,6 +120,16 @@ class Assignment(Base):
     firedrill: Mapped[Firedrill] = relationship(back_populates="assignments")
     owner: Mapped[Person] = relationship()
 
+    @hybrid_property
+    def is_active(self) -> bool:
+        """Not ended by a removal or reassignment. Done assignments are still active."""
+        return self.ended_at is None
+
+    @is_active.inplace.expression
+    @classmethod
+    def _is_active_sql(cls):
+        return cls.ended_at.is_(None)
+
     __table_args__ = (
         Index(
             "uq_assignment_one_unended_per_owner", "firedrill_id", "owner_id",
@@ -161,6 +173,16 @@ class UpdateRequest(Base):
     cancel_reason: Mapped[str | None] = mapped_column(String(30))
     answered_by_update_id: Mapped[int | None] = mapped_column(ForeignKey("update.id"))
     batch_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+
+    @hybrid_property
+    def is_open(self) -> bool:
+        """Neither answered by an update nor cancelled. The partial index below uses the same rule."""
+        return self.answered_by_update_id is None and self.cancelled_at is None
+
+    @is_open.inplace.expression
+    @classmethod
+    def _is_open_sql(cls):
+        return and_(cls.answered_by_update_id.is_(None), cls.cancelled_at.is_(None))
 
     __table_args__ = (
         Index(

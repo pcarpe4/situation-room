@@ -203,8 +203,7 @@ def update_page(request: Request, public_id: uuid.UUID, status: str | None = Non
     chosen = status if status in {s.value for s in mailto_statuses()} else None
     last = db.scalar(select(Update).where(Update.assignment_id == assignment.id).order_by(Update.id.desc()).limit(1))
     open_ask = db.scalar(
-        select(UpdateRequest).where(UpdateRequest.assignment_id == assignment.id,
-                                    UpdateRequest.answered_by_update_id.is_(None), UpdateRequest.cancelled_at.is_(None))
+        select(UpdateRequest).where(UpdateRequest.assignment_id == assignment.id, UpdateRequest.is_open)
         .order_by(UpdateRequest.id.desc()).limit(1)
     )
     asker = db.get(Person, open_ask.asked_by_id) if open_ask else None
@@ -212,7 +211,7 @@ def update_page(request: Request, public_id: uuid.UUID, status: str | None = Non
         request, "update.html", assignment=assignment, firedrill=firedrill, owner=owner, chosen=chosen,
         from_link=chosen is not None, last=last, open_ask=open_ask, asker=asker,
         form_token=uuid.uuid4().hex, error=None, text_value="",
-        closed=firedrill.state != FiredrillState.OPEN, ended=assignment.ended_at is not None,
+        closed=firedrill.state != FiredrillState.OPEN, ended=not assignment.is_active,
     )
 
 

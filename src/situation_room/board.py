@@ -108,7 +108,7 @@ def _load(s: Session, clock: Clock, stale_after: int, owner_id: int | None = Non
     assignments = s.execute(
         select(Assignment, Person)
         .join(Person, Person.id == Assignment.owner_id)
-        .where(Assignment.firedrill_id.in_(by_id), Assignment.ended_at.is_(None))
+        .where(Assignment.firedrill_id.in_(by_id), Assignment.is_active)
         .order_by(Assignment.id)
     ).all()
     assignment_ids = [a.id for a, _ in assignments]
@@ -123,8 +123,7 @@ def _load(s: Session, clock: Clock, stale_after: int, owner_id: int | None = Non
             latest[u.assignment_id] = u
         for r in s.scalars(
             select(UpdateRequest)
-            .where(UpdateRequest.assignment_id.in_(assignment_ids),
-                   UpdateRequest.answered_by_update_id.is_(None), UpdateRequest.cancelled_at.is_(None))
+            .where(UpdateRequest.assignment_id.in_(assignment_ids), UpdateRequest.is_open)
             .ext(distinct_on(UpdateRequest.assignment_id))
             .order_by(UpdateRequest.assignment_id, UpdateRequest.id.desc())
         ):
