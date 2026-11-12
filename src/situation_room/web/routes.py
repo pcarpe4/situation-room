@@ -105,6 +105,15 @@ def board_page(request: Request, filter: str = "open", me: Person = Depends(curr
     return render(request, "board.html", board=view, tab="board", ask_link=_ask_link(request, me))
 
 
+@router.get("/calendar")
+def calendar_page(request: Request, month: str | None = None, me: Person = Depends(current_person),
+                  db: Session = Depends(get_db)):
+    _require(me, Action.VIEW_BOARD)
+    clock = _clock(request)
+    view = board_mod.calendar(db, clock, _cfg(request).stale_after, me, board_mod.parse_month(month, clock.today()))
+    return render(request, "calendar.html", cal=view, tab="calendar")
+
+
 @router.get("/mine")
 def mine_page(request: Request, me: Person = Depends(current_person), db: Session = Depends(get_db)):
     rows = board_mod.mine(db, _clock(request), _cfg(request).stale_after, me)
