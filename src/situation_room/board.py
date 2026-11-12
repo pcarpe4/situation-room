@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import enum
 import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -13,6 +14,7 @@ from sqlalchemy.orm import Session
 from . import dates
 from .clock import Clock
 from .models import Assignment, Firedrill, FiredrillState, Person, Status, Update, UpdateRequest
+from .policy import Action, can
 
 ROLLUP_ORDER = (Status.BLOCKED, Status.AT_RISK, Status.NEW, Status.ON_TRACK, Status.DONE)
 STATUS_LABELS = {
@@ -25,12 +27,91 @@ STATUS_LABELS = {
 FILTERS = ("open", "stale", "asked", "waiting", "due", "overdue")
 
 
-@dataclass
+@dataclass(frozen=True)
 class OpenAsk:
     id: int
     requested_at: datetime
     confirmed_sent_at: datetime | None
     asked_by_id: int
+
+    @property
+    def sent(self) -> bool:
+        """The asker confirmed they emailed it."""
+        return self.confirmed_sent_at is not None
+
+
+class AskState(enum.StrEnum):
+    """Where a line's asks stand, as this viewer should see them."""
+
+    NONE = "none"
+    MINE_UNSENT = "mine_unsent"  # the viewer recorded an ask and has not confirmed emailing it
+    SENT = "sent"  # an ask was emailed and has no reply yet
+    OTHERS_UNSENT = "others_unsent"  # someone else recorded an ask and has not confirmed emailing it
+    WAITING = "waiting"  # no sent ask, and the owner is waiting on a date
+
+
+class LineAction(enum.StrEnum):
+    CONFIRM_SENT = "confirm_sent"
+    CANCEL_ASK = "cancel_ask"
+    ASK_AGAIN = "ask_again"
+    ASK_ANYWAY = "ask_anyway"
+    REQUEST = "request"
+    UPDATE = "update"
+    POST_FOR = "post_for"
+
+
+@dataclass(frozen=True)
+class LineView:
+    ask_state: AskState
+    ask: OpenAsk | None  # the ask `ask_state` is about
+    actions: tuple[LineAction, ...]
+    primary: LineAction | None
+
+
+def line_view(viewer: Person, assignment: Assignment, *, has_update: bool, waiting: bool,
+              asks: list[OpenAsk]) -> LineView:
+    """What `viewer` sees and may do on one owner line. `asks` are its open asks, newest first.
+
+    Role questions go to `policy`; templates only render the result.
+    """
+    is_owner = assignment.owner_id == viewer.id
+    may_post = can(viewer, Action.POST_UPDATE, assignment)
+    if assignment.status == Status.DONE:
+        return LineView(AskState.NONE, None, (LineAction.UPDATE,) if is_owner and may_post else (), None)
+
+    mine = next((a for a in asks if a.asked_by_id == viewer.id and not a.sent), None)
+    sent = next((a for a in asks if a.sent), None)
+    if mine:
+        state, ask = AskState.MINE_UNSENT, mine
+    elif sent:
+        state, ask = AskState.SENT, sent
+    elif asks:
+        state, ask = AskState.OTHERS_UNSENT, asks[0]
+    elif waiting:
+        state, ask = AskState.WAITING, None
+    else:
+        state, ask = AskState.NONE, None
+
+    actions: list[LineAction] = []
+    primary: LineAction | None = None
+    if can(viewer, Action.REQUEST_UPDATE):
+        if state == AskState.MINE_UNSENT:
+            actions += [LineAction.CONFIRM_SENT, LineAction.CANCEL_ASK]
+        elif state in (AskState.SENT, AskState.OTHERS_UNSENT):
+            actions.append(LineAction.ASK_AGAIN)
+        elif state == AskState.WAITING:
+            actions.append(LineAction.ASK_ANYWAY)
+        else:
+            actions.append(LineAction.REQUEST)
+            if assignment.status == Status.NEW and not has_update:
+                primary = LineAction.REQUEST
+    if may_post:
+        if is_owner:
+            actions.append(LineAction.UPDATE)
+            primary = LineAction.UPDATE
+        else:
+            actions.append(LineAction.POST_FOR)
+    return LineView(state, ask, tuple(actions), primary)
 
 
 @dataclass
@@ -49,7 +130,11 @@ class OwnerLine:
     waiting: bool
     stale: bool
     stale_days: int
-    open_ask: OpenAsk | None
+    asked: bool  # an emailed ask is open: what "Asked, no reply" counts
+    ask_state: AskState
+    ask: OpenAsk | None
+    actions: tuple[LineAction, ...]
+    primary: LineAction | None
 
     @property
     def sort_key(self) -> int:
@@ -94,7 +179,7 @@ def rollup(statuses: list[Status]) -> Status:
     return min(not_done, key=ROLLUP_ORDER.index)
 
 
-def _load(s: Session, clock: Clock, stale_after: int, owner_id: int | None = None,
+def _load(s: Session, clock: Clock, stale_after: int, viewer: Person, owner_id: int | None = None,
           public_id: uuid.UUID | None = None) -> list[Row]:
     today = clock.today()
     # No holidays are configured yet; when they are, they go in here.
@@ -116,20 +201,21 @@ def _load(s: Session, clock: Clock, stale_after: int, owner_id: int | None = Non
     assignment_ids = [a.id for a, _ in assignments]
 
     latest: dict[int, Update] = {}
-    asks: dict[int, OpenAsk] = {}
+    asks: dict[int, list[OpenAsk]] = {}
     if assignment_ids:
         for u in s.scalars(
             select(Update).where(Update.assignment_id.in_(assignment_ids))
             .ext(distinct_on(Update.assignment_id)).order_by(Update.assignment_id, Update.id.desc())
         ):
             latest[u.assignment_id] = u
+        # Every open ask, newest first: one viewer's unsent ask must not hide behind someone else's.
         for r in s.scalars(
             select(UpdateRequest)
             .where(UpdateRequest.assignment_id.in_(assignment_ids), UpdateRequest.is_open)
-            .ext(distinct_on(UpdateRequest.assignment_id))
             .order_by(UpdateRequest.assignment_id, UpdateRequest.id.desc())
         ):
-            asks[r.assignment_id] = OpenAsk(r.id, r.requested_at, r.confirmed_sent_at, r.asked_by_id)
+            asks.setdefault(r.assignment_id, []).append(
+                OpenAsk(r.id, r.requested_at, r.confirmed_sent_at, r.asked_by_id))
 
     rows: dict[int, Row] = {}
     for f in firedrills:
@@ -146,12 +232,15 @@ def _load(s: Session, clock: Clock, stale_after: int, owner_id: int | None = Non
         active = a.status != Status.DONE
         state = dates.staleness(created_at=a.created_at, newest_update_at=u.created_at if u else None,
                                 waiting_until=a.waiting_until, done=not active, today=today, rules=rules)
+        open_asks = asks.get(a.id, []) if active else []
+        view = line_view(viewer, a, has_update=u is not None, waiting=state.waiting, asks=open_asks)
         rows[a.firedrill_id].lines.append(OwnerLine(
             assignment_id=a.public_id, owner_id=person.id, owner_name=person.display_name, owner_email=person.email,
             assigned_at=a.created_at, status=a.status, last_update_text=u.text if u else None, last_update_at=u.created_at if u else None,
             last_update_posted_for=bool(u and u.on_behalf_of_id), waiting_until=a.waiting_until,
             waiting_reason=a.waiting_reason, waiting=state.waiting, stale=state.stale, stale_days=state.stale_days,
-            open_ask=asks.get(a.id) if active else None,
+            asked=any(k.sent for k in open_asks),
+            ask_state=view.ask_state, ask=view.ask, actions=view.actions, primary=view.primary,
         ))
 
     result = []
@@ -177,17 +266,17 @@ def _load(s: Session, clock: Clock, stale_after: int, owner_id: int | None = Non
 def _line_matches(line: OwnerLine, active_filter: str) -> bool:
     return {
         "stale": line.stale,
-        "asked": line.open_ask is not None,
+        "asked": line.asked,
         "waiting": line.waiting,
     }[active_filter]
 
 
-def build(s: Session, clock: Clock, stale_after: int, active_filter: str = "open") -> Board:
-    rows = _load(s, clock, stale_after)
+def build(s: Session, clock: Clock, stale_after: int, viewer: Person, active_filter: str = "open") -> Board:
+    rows = _load(s, clock, stale_after, viewer)
     counts = {
         "open": len(rows),
         "stale": sum(line.stale for r in rows for line in r.lines),
-        "asked": sum(line.open_ask is not None for r in rows for line in r.lines),
+        "asked": sum(line.asked for r in rows for line in r.lines),
         "waiting": sum(line.waiting for r in rows for line in r.lines),
         "due": sum(r.due_this_week for r in rows),
         "overdue": sum(r.overdue_days > 0 for r in rows),
@@ -217,17 +306,18 @@ def build(s: Session, clock: Clock, stale_after: int, active_filter: str = "open
     return Board(rows=shown, counts=counts, active_filter=active_filter, result_line=result_line)
 
 
-def mine(s: Session, clock: Clock, stale_after: int, person_id: int) -> list[Row]:
-    """The firedrills a person owns a line on, with their own line first."""
-    rows = _load(s, clock, stale_after, owner_id=person_id)
+def mine(s: Session, clock: Clock, stale_after: int, viewer: Person, person_id: int | None = None) -> list[Row]:
+    """The firedrills a person (the viewer, unless named) owns a line on, with their own line first."""
+    person_id = viewer.id if person_id is None else person_id
+    rows = _load(s, clock, stale_after, viewer, owner_id=person_id)
     for r in rows:
         r.lines.sort(key=lambda line: (line.owner_id != person_id, line.sort_key))
     return rows
 
 
-def one(s: Session, clock: Clock, stale_after: int, public_id: uuid.UUID) -> Row | None:
+def one(s: Session, clock: Clock, stale_after: int, viewer: Person, public_id: uuid.UUID) -> Row | None:
     """The board row for one open firedrill, or None when it is closed or has no owners."""
-    rows = _load(s, clock, stale_after, public_id=public_id)
+    rows = _load(s, clock, stale_after, viewer, public_id=public_id)
     return rows[0] if rows else None
 
 

@@ -19,7 +19,7 @@ Updates are never edited: send another one to correct it.</p>
   {% for row, line in others %}
   <li><a href="/a/{{ line.assignment_id }}/update">{{ row.title }}</a>
     {% if line.stale %}<span class="badge action">Stale {{ line.stale_days }} working days</span>{% endif %}
-    {% if line.open_ask %}<span class="badge info">asked</span>{% endif %}</li>
+    {% if line.asked %}<span class="badge info">asked</span>{% endif %}</li>
   {% endfor %}
 </ul>
 {% endif %}

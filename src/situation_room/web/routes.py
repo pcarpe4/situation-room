@@ -99,7 +99,7 @@ def home(me: Person = Depends(current_person)):
 @router.get("/board")
 def board_page(request: Request, filter: str = "open", me: Person = Depends(current_person), db: Session = Depends(get_db)):
     _require(me, Action.VIEW_BOARD)
-    view = board_mod.build(db, _clock(request), _cfg(request).stale_after, filter)
+    view = board_mod.build(db, _clock(request), _cfg(request).stale_after, me, filter)
     domain.record_board_view(db, _clock(request), me)
     db.commit()
     return render(request, "board.html", board=view, tab="board", ask_link=_ask_link(request, me))
@@ -107,7 +107,7 @@ def board_page(request: Request, filter: str = "open", me: Person = Depends(curr
 
 @router.get("/mine")
 def mine_page(request: Request, me: Person = Depends(current_person), db: Session = Depends(get_db)):
-    rows = board_mod.mine(db, _clock(request), _cfg(request).stale_after, me.id)
+    rows = board_mod.mine(db, _clock(request), _cfg(request).stale_after, me)
     return render(request, "mine.html", rows=rows, tab="mine", ask_link=_ask_link(request, me))
 
 
@@ -167,7 +167,7 @@ def firedrill_page(request: Request, public_id: uuid.UUID, me: Person = Depends(
     firedrill = db.scalar(select(Firedrill).where(Firedrill.public_id == public_id))
     if firedrill is None:
         raise Refused("NOT_FOUND", "No such firedrill.", 404)
-    row = board_mod.one(db, _clock(request), _cfg(request).stale_after, public_id)
+    row = board_mod.one(db, _clock(request), _cfg(request).stale_after, me, public_id)
     history = db.execute(
         select(Update, Person, Assignment)
         .join(Assignment, Assignment.id == Update.assignment_id)
@@ -239,9 +239,9 @@ def post_update(request: Request, public_id: uuid.UUID, status: str = Form(""), 
     answered = db.scalars(select(UpdateRequest).where(UpdateRequest.answered_by_update_id == upd.id)).all()
     assignment, firedrill, owner = _assignment_context(db, public_id)
     others = [
-        (row, line) for row in board_mod.mine(db, clock, _cfg(request).stale_after, owner.id)
+        (row, line) for row in board_mod.mine(db, clock, _cfg(request).stale_after, me, owner.id)
         for line in row.lines
-        if line.owner_id == owner.id and line.assignment_id != public_id and (line.stale or line.open_ask)
+        if line.owner_id == owner.id and line.assignment_id != public_id and (line.stale or line.asked)
     ]
     return render(request, "update_sent.html", update=upd, firedrill=firedrill, owner=owner,
                   answered=answered, others=others)

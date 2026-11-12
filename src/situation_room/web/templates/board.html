@@ -33,7 +33,7 @@
 {% else %}
   <div class="empty">
     {% if board.active_filter == 'open' %}
-      {% if me.role.value in ('lead', 'triage') %}
+      {% if can('create_firedrill') %}
         <p>Nothing is open. <a href="/firedrills/new">Start a firedrill</a>.</p>
       {% else %}
         <p>Nothing is open.</p>

@@ -8,32 +8,25 @@
 {%- endmacro %}
 
 {% macro ask_cell(row, line, back) -%}
+{# Renders line.actions as decided by board.line_view. No rules here. #}
 <div class="ask">
-{% if line.status == Status.DONE %}
-{% elif me.role.value in ('lead', 'triage') %}
-  {% set a = line.open_ask %}
-  {% if a and not a.confirmed_sent_at and a.asked_by_id == me.id %}
-    <span class="ask-state">Asked {{ a.requested_at|ago }}.</span>
-    <a class="button" href="{{ ask_link(row, line) }}">Open the email</a>
-    <span class="ask-state">Sent it?</span>
-    <form method="post" action="/asks/{{ a.id }}/sent">{{ hidden(back) }}<button type="submit">Yes</button></form>
-    <form method="post" action="/asks/{{ a.id }}/cancel">{{ hidden(back) }}<button class="quiet" type="submit">Cancel</button></form>
-  {% elif a %}
-    <span class="ask-state">Asked {{ a.requested_at|ago }}, no reply</span>
-    <form method="post" action="/a/{{ line.assignment_id }}/ask">{{ hidden(back) }}<button class="quiet" type="submit">Ask again</button></form>
-  {% elif line.waiting %}
-    <form method="post" action="/a/{{ line.assignment_id }}/ask">{{ hidden(back) }}<button class="quiet" type="submit">Ask anyway</button></form>
-  {% elif line.status == Status.NEW and not line.last_update_at %}
-    <span class="ask-state">Not yet asked</span>
-    <form method="post" action="/a/{{ line.assignment_id }}/ask">{{ hidden(back) }}<button class="primary" type="submit">Request update</button></form>
-  {% else %}
-    <form method="post" action="/a/{{ line.assignment_id }}/ask">{{ hidden(back) }}<button type="submit">Request update</button></form>
-  {% endif %}
+{% if LineAction.CONFIRM_SENT in line.actions %}
+  <span class="ask-state">Asked {{ line.ask.requested_at|ago }}.</span>
+  <a class="button" href="{{ ask_link(row, line) }}">Open the email</a>
+  <span class="ask-state">Sent it?</span>
+  <form method="post" action="/asks/{{ line.ask.id }}/sent">{{ hidden(back) }}<button type="submit">Yes</button></form>
+  {% if LineAction.CANCEL_ASK in line.actions %}<form method="post" action="/asks/{{ line.ask.id }}/cancel">{{ hidden(back) }}<button class="quiet" type="submit">Cancel</button></form>{% endif %}
+{% elif LineAction.ASK_AGAIN in line.actions %}
+  <span class="ask-state">Asked {{ line.ask.requested_at|ago }}, {{ 'no reply' if line.ask.sent else 'not emailed yet' }}</span>
+  <form method="post" action="/a/{{ line.assignment_id }}/ask">{{ hidden(back) }}<button class="quiet" type="submit">Ask again</button></form>
+{% elif LineAction.ASK_ANYWAY in line.actions %}
+  <form method="post" action="/a/{{ line.assignment_id }}/ask">{{ hidden(back) }}<button class="quiet" type="submit">Ask anyway</button></form>
+{% elif LineAction.REQUEST in line.actions %}
+  {% if line.primary == LineAction.REQUEST %}<span class="ask-state">Not yet asked</span>{% endif %}
+  <form method="post" action="/a/{{ line.assignment_id }}/ask">{{ hidden(back) }}<button {% if line.primary == LineAction.REQUEST %}class="primary" {% endif %}type="submit">Request update</button></form>
 {% endif %}
-{% if line.owner_id == me.id and line.status != Status.DONE %}
-  <a class="button primary" href="/a/{{ line.assignment_id }}/update">Update</a>
-{% elif line.owner_id == me.id %}
-  <a class="button quiet" href="/a/{{ line.assignment_id }}/update">Update</a>
+{% if LineAction.UPDATE in line.actions %}
+  <a class="button {{ 'primary' if line.primary == LineAction.UPDATE else 'quiet' }}" href="/a/{{ line.assignment_id }}/update">Update</a>
 {% endif %}
 </div>
 {%- endmacro %}

@@ -32,7 +32,7 @@
     {% for p in owners %}
       <label class="check"><input type="checkbox" name="owner_ids" value="{{ p.id }}" {% if p.id in chosen %}checked{% endif %}> {{ p.display_name }} <span class="meta">{{ p.role.value|capitalize }}</span></label>
     {% else %}
-      <p class="meta">No active managers or leads on the roster yet.{% if me.role.value == 'triage' %} <a href="/roster">Add people</a>.{% endif %}</p>
+      <p class="meta">No active managers or leads on the roster yet.{% if can('manage_roster') %} <a href="/roster">Add people</a>.{% endif %}</p>
     {% endfor %}
   </fieldset>
   <button class="primary" type="submit">Publish</button>

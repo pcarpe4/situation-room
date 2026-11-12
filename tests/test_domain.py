@@ -192,7 +192,7 @@ def test_board_marks_stale_waiting_and_sorts_stale_first(db, clock, people):
     domain.post_update(db, clock, people.bob, b.public_id, status="blocked", text="", form_token="b")
     db.commit()
 
-    view = board.build(db, clock, 3)
+    view = board.build(db, clock, 3, people.lead)
     assert [r.title for r in view.rows] == ["Old one", "Blocked one"]
     assert view.rows[0].lines[0].stale and view.rows[0].lines[0].stale_days == 5
     assert view.counts["stale"] == 1
@@ -200,7 +200,7 @@ def test_board_marks_stale_waiting_and_sorts_stale_first(db, clock, people):
     a = assignment_of(db, stale, people.ann)
     domain.set_wait(db, clock, people.ann, a.public_id, until=clock.today() + timedelta(days=2), reason="Vendor")
     db.commit()
-    view = board.build(db, clock, 3)
+    view = board.build(db, clock, 3, people.lead)
     assert view.counts["stale"] == 0 and view.counts["waiting"] == 1
 
 
@@ -221,7 +221,7 @@ def test_board_uses_a_fixed_number_of_queries(engine, sm, clock, people):
             n += 1
         event.listen(engine, "before_cursor_execute", bump)
         with sm() as s:
-            board.build(s, clock, 3)
+            board.build(s, clock, 3, s.get(type(people.lead), people.lead.id))
         event.remove(engine, "before_cursor_execute", bump)
         return n
 

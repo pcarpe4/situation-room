@@ -4,6 +4,7 @@ from fastapi import Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
+from ..policy import Action, can
 from .security import csrf_token
 
 THEME_COOKIE = "sr_theme"
@@ -18,6 +19,9 @@ def theme_of(request: Request) -> str:
 def render(request: Request, name: str, status_code: int = 200, **context: object) -> HTMLResponse:
     templates: Jinja2Templates = request.app.state.templates
     context.setdefault("me", getattr(request.state, "person", None))
+    me = context["me"]
+    # Templates ask policy, never the role: {% if can('create_firedrill') %}
+    context["can"] = lambda action, obj=None: can(me, Action(action), obj)
     context["cfg"] = request.app.state.cfg
     context["csrf_token"] = csrf_token(request)
     context["theme"] = theme_of(request)

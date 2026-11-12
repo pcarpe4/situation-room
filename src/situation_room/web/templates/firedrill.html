@@ -18,7 +18,7 @@
 <ul class="lines">
   {% for line in row.lines %}
     {{ owner_line(row, line, '/f/' ~ firedrill.public_id) }}
-    {% if me.role.value in ('lead', 'triage') and line.owner_id != me.id and line.status != Status.DONE %}
+    {% if LineAction.POST_FOR in line.actions %}
       <li class="post-for"><a href="/a/{{ line.assignment_id }}/update">Post an update for {{ line.owner_name }}</a></li>
     {% endif %}
   {% endfor %}

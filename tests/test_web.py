@@ -190,3 +190,24 @@ def test_theme_refuses_odd_values_and_offsite_back_links(client):
                     follow_redirects=False)
     assert r.headers["location"] == "/"
     assert "data-theme" not in client.get("/signin").text.split("<head>")[0]
+
+
+def test_a_lead_keeps_sent_it_after_triage_asks_too(db, clock, client, people):
+    f = make(db, clock, people)
+    a = db.scalar(select(Assignment).where(Assignment.firedrill_id == f.id))
+    mine = domain.request_update(db, clock, people.lead, a.public_id)
+    domain.request_update(db, clock, people.triage, a.public_id)
+    db.commit()
+    sign_in(client, people.lead)
+    html = client.get("/board").text
+    assert "Sent it?" in html and f'action="/asks/{mine.id}/sent"' in html
+
+
+def test_navigation_follows_policy(client, people):
+    sign_in(client, people.ann)
+    html = client.get("/mine").text
+    assert "/firedrills/new" not in html and 'href="/roster"' not in html
+    client.cookies.clear()
+    sign_in(client, people.triage)
+    html = client.get("/board").text
+    assert 'href="/firedrills/new"' in html and 'href="/roster"' in html

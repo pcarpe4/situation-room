@@ -16,7 +16,7 @@ from sqlalchemy.exc import OperationalError
 from starlette.middleware.sessions import SessionMiddleware
 
 from .. import config as config_mod
-from ..board import STATUS_LABELS
+from ..board import STATUS_LABELS, LineAction
 from ..clock import Clock
 from ..config import Config
 from ..db import make_engine, make_sessionmaker
@@ -121,6 +121,7 @@ def _templates(cfg: Config, clock: Clock) -> Jinja2Templates:
     env.filters["exact"] = exact
     env.globals["status_label"] = lambda s: STATUS_LABELS[Status(s)]
     env.globals["Status"] = Status
+    env.globals["LineAction"] = LineAction
     env.globals["today"] = clock.today
     return templates
 
