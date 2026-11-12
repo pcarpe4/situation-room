@@ -243,3 +243,16 @@ def test_board_uses_a_fixed_number_of_queries(engine, sm, clock, people):
             domain.request_update(s, clock, lead, a.public_id)
         s.commit()
     assert count_queries() == small
+
+
+def test_a_wait_reason_has_a_length_limit_and_the_earliest_day_is_tomorrow(db, clock, people):
+    f = make(db, clock, people)
+    a = assignment_of(db, f, people.ann)
+    assert domain.earliest_wait_date(clock) == date(2026, 11, 12)
+    with pytest.raises(DomainError) as err:
+        domain.set_wait(db, clock, people.ann, a.public_id, until=domain.earliest_wait_date(clock),
+                        reason="x" * (domain.WAIT_REASON_MAX + 1))
+    assert err.value.code == "FIELD_TOO_LONG"
+    db.rollback()
+    domain.set_wait(db, clock, people.ann, a.public_id, until=domain.earliest_wait_date(clock),
+                    reason="x" * domain.WAIT_REASON_MAX)

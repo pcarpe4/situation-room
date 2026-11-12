@@ -13,7 +13,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert
@@ -38,6 +38,7 @@ from .policy import Action, can
 TITLE_MAX = 200
 DESCRIPTION_MAX = 500
 UPDATE_TEXT_MAX = 4000
+WAIT_REASON_MAX = 300
 OWNER_ROLES = (Role.MANAGER, Role.LEAD)
 
 
@@ -291,6 +292,11 @@ def post_update(
     return _record_event(s, clock, actor, assignment_public_id, form_token=form_token, build=build)
 
 
+def earliest_wait_date(clock: Clock) -> date:
+    """A wait runs through its date, so the earliest useful one is tomorrow."""
+    return clock.today() + timedelta(days=1)
+
+
 def set_wait(
     s: Session, clock: Clock, actor: Person, assignment_public_id: uuid.UUID, *,
     until: date, reason: str, form_token: str = "",
@@ -304,7 +310,9 @@ def set_wait(
         why = " ".join((reason or "").split())
         if not why:
             raise DomainError("FIELD_REQUIRED", "Say what you are waiting for.", 400)
-        if until <= clock.today():
+        if len(why) > WAIT_REASON_MAX:
+            raise DomainError("FIELD_TOO_LONG", f"Keep the reason under {WAIT_REASON_MAX} characters.", 400)
+        if until < earliest_wait_date(clock):
             raise DomainError("FIELD_INVALID", "The waiting date must be in the future.", 400)
 
         def apply(a: Assignment) -> None:

@@ -43,6 +43,27 @@
     <p class="meta">{% if owner.id != me.id %}Posted for {{ owner.display_name }}. {% endif %}Everyone signed in to the board can read it.</p>
     <button class="primary" type="submit">Send</button>
   </form>
+
+  {% if wait_error and assignment.status == Status.DONE %}<p class="error" role="alert">{{ wait_error }}</p>{% endif %}
+  {% if assignment.status != Status.DONE %}
+  <h2 id="wait">Waiting on something?</h2>
+  <p class="meta">Pick the day you expect to move again. Until then this line shows "Waiting" and does not go stale.</p>
+  {% if wait_error %}<p class="error" role="alert">{{ wait_error }}</p>{% endif %}
+  <form method="post" action="/a/{{ assignment.public_id }}/wait" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="form_token" value="{{ wait_token }}">
+    <div class="two">
+      <label>Waiting until
+        <input name="until" type="date" min="{{ earliest_wait.isoformat() }}" required value="{{ wait_until }}">
+      </label>
+      <label>Waiting for
+        <input name="reason" type="text" maxlength="{{ wait_reason_max }}" required value="{{ wait_reason }}" placeholder="Vendor patch, change window, another team">
+      </label>
+    </div>
+    {% if owner.id != me.id %}<p class="meta">Posted for {{ owner.display_name }}.</p>{% endif %}
+    <button type="submit">Set wait</button>
+  </form>
+  {% endif %}
 {% endif %}
 </div>
 {% endblock %}

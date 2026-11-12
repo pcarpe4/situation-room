@@ -194,25 +194,37 @@ def _assignment_context(db: Session, public_id: uuid.UUID):
     return found
 
 
-@router.get("/a/{public_id}/update")
-def update_page(request: Request, public_id: uuid.UUID, status: str | None = None,
-                me: Person = Depends(current_person), db: Session = Depends(get_db)):
+def _render_update_page(request: Request, db: Session, me: Person, public_id: uuid.UUID, *,
+                        status_code: int = 200, **form: object):
+    """The update page, with its wait form. Errors re-render it through here, so what was typed
+    is kept and the page still shows the last update and who asked."""
     assignment, firedrill, owner = _assignment_context(db, public_id)
     if not can(me, Action.POST_UPDATE, assignment):
         raise Refused("NOT_OWNER", f"This assignment belongs to {owner.display_name}.")
-    chosen = status if status in {s.value for s in mailto_statuses()} else None
     last = db.scalar(select(Update).where(Update.assignment_id == assignment.id).order_by(Update.id.desc()).limit(1))
     open_ask = db.scalar(
         select(UpdateRequest).where(UpdateRequest.assignment_id == assignment.id, UpdateRequest.is_open)
         .order_by(UpdateRequest.id.desc()).limit(1)
     )
     asker = db.get(Person, open_ask.asked_by_id) if open_ask else None
-    return render(
-        request, "update.html", assignment=assignment, firedrill=firedrill, owner=owner, chosen=chosen,
-        from_link=chosen is not None, last=last, open_ask=open_ask, asker=asker,
-        form_token=uuid.uuid4().hex, error=None, text_value="",
-        closed=firedrill.state != FiredrillState.OPEN, ended=not assignment.is_active,
+    context = dict(
+        chosen=None, form_token=uuid.uuid4().hex, error=None, text_value="",
+        wait_token=uuid.uuid4().hex, wait_error=None, wait_until="", wait_reason="",
     )
+    context.update(form)
+    return render(
+        request, "update.html", status_code=status_code, assignment=assignment, firedrill=firedrill, owner=owner,
+        from_link=context["chosen"] is not None, last=last, open_ask=open_ask, asker=asker,
+        closed=firedrill.state != FiredrillState.OPEN, ended=not assignment.is_active,
+        earliest_wait=domain.earliest_wait_date(_clock(request)), wait_reason_max=domain.WAIT_REASON_MAX, **context,
+    )
+
+
+@router.get("/a/{public_id}/update")
+def update_page(request: Request, public_id: uuid.UUID, status: str | None = None,
+                me: Person = Depends(current_person), db: Session = Depends(get_db)):
+    chosen = status if status in {s.value for s in mailto_statuses()} else None
+    return _render_update_page(request, db, me, public_id, chosen=chosen)
 
 
 def mailto_statuses() -> list[Status]:
@@ -226,15 +238,12 @@ def post_update(request: Request, public_id: uuid.UUID, status: str = Form(""), 
     try:
         upd = domain.post_update(db, clock, me, public_id, status=status, text=text, form_token=form_token)
     except domain.DomainError as exc:
-        db.rollback()
+        # Re-raise before any rollback: a rollback expires `me`, which the error page still reads.
         if exc.code not in ("STATUS_REQUIRED", "FIELD_TOO_LONG"):
             raise
-        assignment, firedrill, owner = _assignment_context(db, public_id)
-        return render(
-            request, "update.html", status_code=exc.http_status, assignment=assignment, firedrill=firedrill,
-            owner=owner, chosen=None, from_link=False, last=None, open_ask=None, asker=None,
-            form_token=form_token, error=exc.message, text_value=text, closed=False, ended=False,
-        )
+        db.rollback()
+        return _render_update_page(request, db, me, public_id, status_code=exc.http_status,
+                                   form_token=form_token, error=exc.message, text_value=text)
     db.commit()
     answered = db.scalars(select(UpdateRequest).where(UpdateRequest.answered_by_update_id == upd.id)).all()
     assignment, firedrill, owner = _assignment_context(db, public_id)
@@ -245,6 +254,29 @@ def post_update(request: Request, public_id: uuid.UUID, status: str = Form(""), 
     ]
     return render(request, "update_sent.html", update=upd, firedrill=firedrill, owner=owner,
                   answered=answered, others=others)
+
+
+@router.post("/a/{public_id}/wait")
+def set_wait(request: Request, public_id: uuid.UUID, until: str = Form(""), reason: str = Form(""),
+             form_token: str = Form(""), me: Person = Depends(current_person), db: Session = Depends(get_db)):
+    def again(status_code: int, message: str):
+        return _render_update_page(request, db, me, public_id, status_code=status_code, wait_error=message,
+                                   wait_token=form_token, wait_until=until, wait_reason=reason)
+
+    try:
+        until_date = date.fromisoformat(until)
+    except ValueError:
+        return again(400, "Pick a date.")
+    try:
+        domain.set_wait(db, _clock(request), me, public_id, until=until_date, reason=reason, form_token=form_token)
+    except domain.DomainError as exc:
+        if exc.code not in ("FIELD_REQUIRED", "FIELD_INVALID", "FIELD_TOO_LONG", "ASSIGNMENT_DONE"):
+            raise
+        db.rollback()
+        return again(exc.http_status, exc.message)
+    db.commit()
+    _, firedrill, _ = _assignment_context(db, public_id)
+    return _see_other(f"/f/{firedrill.public_id}#a-{public_id}")
 
 
 @router.post("/a/{public_id}/ask")
@@ -304,9 +336,9 @@ def roster_deactivate(request: Request, person_id: int, me: Person = Depends(cur
     try:
         domain.deactivate_person(db, _clock(request), me, person_id)
     except domain.DomainError as exc:
-        db.rollback()
         if exc.http_status == 403:
             raise
+        db.rollback()
         return render(request, "roster.html", status_code=exc.http_status, people=_roster(db), roles=list(Role),
                       form={}, error=exc.message, tab="roster")
     db.commit()

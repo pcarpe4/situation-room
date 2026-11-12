@@ -1,5 +1,8 @@
 import re
+from datetime import datetime
 from urllib.parse import unquote
+
+import pytest
 
 from sqlalchemy import func, select
 from sqlalchemy.engine import create_engine
@@ -211,3 +214,125 @@ def test_navigation_follows_policy(client, people):
     sign_in(client, people.triage)
     html = client.get("/board").text
     assert 'href="/firedrills/new"' in html and 'href="/roster"' in html
+
+
+def test_the_update_page_offers_a_wait(db, clock, client, people):
+    f = make(db, clock, people)
+    a = db.scalar(select(Assignment).where(Assignment.firedrill_id == f.id))
+    sign_in(client, people.ann)
+    html = client.get(f"/a/{a.public_id}/update").text
+    assert f'action="/a/{a.public_id}/wait"' in html
+    assert 'name="until" type="date" min="2026-11-12" required' in html
+    assert 'name="reason"' in html
+
+
+def _wait_form(client, a):
+    html = client.get(f"/a/{a.public_id}/update").text
+    token = re.search(r'action="/a/[^"]+/wait".*?name="form_token" value="([^"]+)"', html, re.S).group(1)
+    return {"csrf_token": csrf_from(html), "form_token": token}
+
+
+def test_setting_a_wait_moves_the_line_to_waiting(db, clock, client, people):
+    f = make(db, clock, people)
+    a = db.scalar(select(Assignment).where(Assignment.firedrill_id == f.id))
+    sign_in(client, people.ann)
+    data = {**_wait_form(client, a), "until": "2026-11-16", "reason": "Vendor ships the patch Monday"}
+    r = client.post(f"/a/{a.public_id}/wait", data=data, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == f"/f/{f.public_id}#a-{a.public_id}"
+
+    client.cookies.clear()
+    sign_in(client, people.lead)
+    board_html = client.get("/board?filter=waiting").text
+    assert "Waiting until Mon Nov 16" in board_html and "Vendor ships the patch Monday" in board_html
+    assert "Ask anyway" in board_html
+    assert "Waiting · 1 owner" in board_html
+
+
+def test_a_wait_error_keeps_what_was_typed(db, clock, client, people):
+    f = make(db, clock, people)
+    a = db.scalar(select(Assignment).where(Assignment.firedrill_id == f.id))
+    domain.post_update(db, clock, people.ann, a.public_id, status="on_track", text="Halfway there.", form_token="u1")
+    db.commit()
+    sign_in(client, people.ann)
+    form = _wait_form(client, a)
+
+    r = client.post(f"/a/{a.public_id}/wait", data={**form, "until": "2026-11-11", "reason": "Vendor patch"})
+    assert r.status_code == 400 and "The waiting date must be in the future." in r.text
+    assert 'value="Vendor patch"' in r.text and 'value="2026-11-11"' in r.text
+    assert "Halfway there." in r.text
+    assert f'name="form_token" value="{form["form_token"]}"' in r.text
+
+    r = client.post(f"/a/{a.public_id}/wait", data={**form, "until": "2026-11-20", "reason": "  "})
+    assert r.status_code == 400 and "Say what you are waiting for." in r.text and 'value="2026-11-20"' in r.text
+
+    r = client.post(f"/a/{a.public_id}/wait", data={**form, "until": "", "reason": "Vendor patch"})
+    assert r.status_code == 400 and "Pick a date." in r.text
+    assert db.scalar(select(func.count()).select_from(Update)) == 1
+
+
+@pytest.mark.parametrize("who", ["lead", "triage"])
+def test_lead_or_triage_sets_a_wait_for_the_owner_once_and_it_answers_the_ask(who, db, clock, client, people):
+    f = make(db, clock, people)
+    a = db.scalar(select(Assignment).where(Assignment.firedrill_id == f.id))
+    ask = domain.request_update(db, clock, people.lead, a.public_id)
+    db.commit()
+    poster = getattr(people, who)
+    sign_in(client, poster)
+    assert "Posted for Ann Manager" in client.get(f"/a/{a.public_id}/update").text.split('id="wait"')[1]
+    data = {**_wait_form(client, a), "until": "2026-11-16", "reason": "Change window Monday"}
+    for _ in range(2):
+        client.post(f"/a/{a.public_id}/wait", data=data, follow_redirects=False)
+    assert db.scalar(select(func.count()).select_from(Update)) == 1
+    db.refresh(ask)
+    assert ask.answered_by_update_id is not None
+    page = client.get(f"/f/{f.public_id}").text
+    assert f"posted for, by {poster.display_name}" in page and "Change window Monday" in page
+
+
+def test_a_done_assignment_offers_no_wait_and_refuses_one(db, clock, client, people):
+    f = make(db, clock, people)
+    a = db.scalar(select(Assignment).where(Assignment.firedrill_id == f.id))
+    sign_in(client, people.ann)
+    form = _wait_form(client, a)
+    domain.post_update(db, clock, people.ann, a.public_id, status="done", text="Finished.", form_token="d1")
+    db.commit()
+    assert f'action="/a/{a.public_id}/wait"' not in client.get(f"/a/{a.public_id}/update").text
+    r = client.post(f"/a/{a.public_id}/wait", data={**form, "until": "2026-11-16", "reason": "Late"})
+    assert r.status_code == 409 and "This assignment is done, so it cannot wait." in r.text
+
+
+def test_a_stale_line_leaves_the_stale_filter_when_it_waits(db, clock, client, people):
+    clock.set(datetime(2026, 11, 2, 10))
+    f = make(db, clock, people)
+    clock.set(datetime(2026, 11, 11, 10))
+    a = db.scalar(select(Assignment).where(Assignment.firedrill_id == f.id))
+    sign_in(client, people.ann)
+    assert "Stale · 1 owner" in client.get("/board").text
+    client.post(f"/a/{a.public_id}/wait", data={**_wait_form(client, a), "until": "2026-11-16", "reason": "Vendor"})
+    board_html = client.get("/board?filter=stale").text
+    assert "Nothing is stale." in board_html and "Waiting · 1 owner" in board_html
+
+
+def test_a_manager_cannot_set_a_wait_on_someone_elses_line(db, clock, client, people):
+    f = make(db, clock, people)
+    a = db.scalar(select(Assignment).where(Assignment.firedrill_id == f.id))
+    token = sign_in(client, people.bob)
+    r = client.post(f"/a/{a.public_id}/wait", data={"csrf_token": token, "form_token": "x", "until": "2026-11-16",
+                                                      "reason": "Not mine"})
+    assert r.status_code == 403
+    assert db.scalar(select(func.count()).select_from(Update)) == 0
+
+
+def test_a_manager_cannot_post_an_update_on_someone_elses_line(db, clock, client, people):
+    f = make(db, clock, people)
+    a = db.scalar(select(Assignment).where(Assignment.firedrill_id == f.id))
+    token = sign_in(client, people.bob)
+    r = client.post(f"/a/{a.public_id}/update", data={"csrf_token": token, "form_token": "x", "status": "on_track",
+                                                        "text": "Not mine"})
+    assert r.status_code == 403 and "NOT_ALLOWED" in r.text
+
+
+def test_a_lead_cannot_deactivate_someone(client, people):
+    token = sign_in(client, people.lead)
+    r = client.post(f"/roster/{people.ann.id}/deactivate", data={"csrf_token": token})
+    assert r.status_code == 403 and "NOT_ALLOWED" in r.text
