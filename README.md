@@ -74,7 +74,7 @@ Read from the environment at start. A missing or invalid key stops the app with 
 - New firedrill by hand, with owners, due date, source and ticket numbers
 - Board: counts that filter (open, stale, asked with no reply, waiting, due this week, overdue), stale first then by status then due date, one line per owner
 - My assignments, the landing page for managers
-- Request update: records the ask and opens a prefilled email with four status links; "Sent it?" Yes or Cancel
+- Request update: records the ask and opens a prefilled email with four status links; "Sent it?" Yes or Cancel ask
 - Update form from a status link or the Update button; a repeated Send makes one update; an update answers every open ask; a Lead can post for an owner
 - Firedrill page with the full update history
 - Waiting until a date, set from the update page: the line shows the date and reason, does not go stale, and the wait answers open asks

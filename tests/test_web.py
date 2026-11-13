@@ -1,3 +1,4 @@
+import hashlib
 import re
 from datetime import datetime
 from urllib.parse import unquote
@@ -153,9 +154,27 @@ def test_the_database_being_down_shows_the_outage_page(cfg, clock):
     dead = create_engine("postgresql+psycopg://postgres@/nope?host=/nonexistent", hide_parameters=True)
     with TestClient(create_app(cfg, clock=clock, engine=dead)) as c:
         r = c.get("/signin")
+        version = _css_version(c)
     assert r.status_code == 503
     assert r.headers["retry-after"] == "30"
     assert "unavailable" in r.text
+    assert f"/static/app.css?v={version}" in r.text
+
+
+def _css_version(client):
+    css = client.get("/static/app.css")
+    assert css.status_code == 200
+    return hashlib.sha256(css.content).hexdigest()[:12]
+
+
+def test_pages_link_the_stylesheet_by_a_hash_of_its_content(client):
+    # Value: protects=a deploy that changes app.css changes its URL, so browsers never pair new
+    # markup (e.g. the hidden board h1) with cached old CSS; fails_when=the link loses its ?v= or
+    # the hash stops tracking the served file; why_new=no test covered the stylesheet link;
+    # seam=none; no_claim=browser cache headers or a real cache
+    html = client.get("/signin").text
+    assert f'href="/static/app.css?v={_css_version(client)}"' in html
+    assert client.get(f"/static/app.css?v={_css_version(client)}").status_code == 200
 
 
 def test_theme_defaults_to_system(client):
@@ -204,6 +223,19 @@ def test_a_lead_keeps_sent_it_after_triage_asks_too(db, clock, client, people):
     sign_in(client, people.lead)
     html = client.get("/board").text
     assert "Sent it?" in html and f'action="/asks/{mine.id}/sent"' in html
+    # Value: protects=the cancel button beside 'Sent it?' says it cancels the ask (FINDING-011);
+    # fails_when=the label goes back to a bare 'Cancel' or the cancel form drops out; why_new=no test
+    # rendered the cancel-ask control at all; seam=none; no_claim=styling of the quiet button
+    assert re.search(rf'action="/asks/{mine.id}/cancel">(?:(?!</form>).)*>Cancel ask</button>', html, re.S)
+
+
+def test_the_board_has_one_page_heading(client, people):
+    # Value: protects=the board exposes a single page-level h1 for screen-reader heading navigation;
+    # fails_when=the hidden h1 is removed or a second h1 is added; why_new=no test checked board headings;
+    # seam=none; no_claim=that the heading is visually hidden (CSS)
+    sign_in(client, people.lead)
+    html = client.get("/board").text
+    assert re.findall(r"<h1\b[^>]*>(.*?)</h1>", html) == ["Board"]
 
 
 def test_navigation_follows_policy(client, people):
@@ -214,6 +246,22 @@ def test_navigation_follows_policy(client, people):
     sign_in(client, people.triage)
     html = client.get("/board").text
     assert 'href="/firedrills/new"' in html and 'href="/roster"' in html
+
+
+def test_the_new_firedrill_page_marks_its_nav_link_current(client, people):
+    token = sign_in(client, people.lead)
+    current = 'href="/firedrills/new" aria-current="page"'
+    assert current in client.get("/firedrills/new").text
+    r = client.post("/firedrills/new", data={"csrf_token": token, "title": "Keep me", "short_description": "And me"})
+    assert r.status_code == 400 and current in r.text
+    # Value: protects=the bad-due-date re-render keeps its error and the current nav mark; fails_when=tab="new"
+    # is dropped from the ValueError branch or that branch stops rendering the form; why_new=only the
+    # DomainError branch was exercised; seam=none; no_claim=browser date-picker validation
+    r = client.post("/firedrills/new", data={"csrf_token": token, "title": "Keep me", "short_description": "And me",
+                                             "due_date": "2026-02-30"})
+    assert r.status_code == 400 and "Due date is not a valid date." in r.text and current in r.text
+    assert 'value="Keep me"' in r.text
+    assert current not in client.get("/board").text
 
 
 def test_the_update_page_offers_a_wait(db, clock, client, people):

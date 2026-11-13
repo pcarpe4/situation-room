@@ -64,6 +64,10 @@ a { color: var(--accent); }
 h1 { font-size: 1.5rem; margin: 0.5rem 0 1rem; }
 h2 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
 code { font-size: 0.9em; }
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
 
 .devbar { background: var(--warn-bg); text-align: center; font-size: 0.85rem; padding: 2px 8px; }
 
@@ -93,7 +97,7 @@ button, .button {
 }
 button.primary, .button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 button.quiet, .button.quiet { background: transparent; }
-button:focus-visible, .button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible {
+button:focus-visible, .button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
   outline: 3px solid var(--accent); outline-offset: 2px;
 }
 
@@ -111,7 +115,8 @@ button:focus-visible, .button:focus-visible, a:focus-visible, input:focus-visibl
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
   padding: 0.9rem 1rem; margin-bottom: 0.9rem;
 }
-.row.is-stale { border-left: 4px solid var(--action); }
+/* The thicker edge takes its 3 extra pixels from the padding, so text lines up with the other cards. */
+.row.is-stale { border-left: 4px solid var(--action); padding-left: calc(1rem - 3px); }
 .row h2 { margin: 0; font-size: 1.1rem; }
 .row h2 a { color: var(--text); }
 .row-meta { display: flex; flex-wrap: wrap; gap: 0.75rem; color: var(--muted); font-size: 0.9rem; margin-top: 0.2rem; }
@@ -120,14 +125,14 @@ button:focus-visible, .button:focus-visible, a:focus-visible, input:focus-visibl
 
 .lines { list-style: none; margin: 0; padding: 0; }
 .line {
-  display: grid; grid-template-columns: 14rem 1fr auto; gap: 0.75rem; align-items: start;
+  display: grid; grid-template-columns: 14rem minmax(12rem, 1fr) auto; gap: 0.75rem; align-items: start;
   padding: 0.6rem 0; border-top: 1px solid var(--line);
 }
 .line-head { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
 .line-body p { margin: 0; }
 .update-text {
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
-  white-space: pre-line;
+  white-space: pre-line; overflow-wrap: anywhere;
 }
 .meta { color: var(--muted); font-size: 0.85rem; }
 .more { margin: 0.4rem 0 0; }
@@ -157,14 +162,14 @@ button:focus-visible, .button:focus-visible, a:focus-visible, input:focus-visibl
 .stack { display: flex; flex-direction: column; gap: 0.9rem; }
 .stack label { display: flex; flex-direction: column; gap: 0.25rem; font-weight: 600; }
 .stack label.check, .stack label.status-choice { flex-direction: row; align-items: center; gap: 0.5rem; font-weight: 400; }
-.two { display: grid; grid-template-columns: 1fr 1fr; gap: 0.9rem; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 0.9rem; align-items: end; }
 .req { font-weight: 400; color: var(--muted); font-size: 0.85rem; }
 input, textarea, select {
-  font: inherit; padding: 0.45rem 0.6rem; border: 1px solid var(--line); border-radius: var(--radius);
+  font: inherit; font-weight: 400; padding: 0.45rem 0.6rem; border: 1px solid var(--line); border-radius: var(--radius);
   background: var(--surface); color: var(--text); width: 100%;
 }
 input[type="checkbox"], input[type="radio"] { width: auto; min-width: 20px; min-height: 20px; }
-fieldset { border: 1px solid var(--line); border-radius: var(--radius); padding: 0.6rem 0.9rem; }
+fieldset { margin: 0; min-inline-size: 0; border: 1px solid var(--line); border-radius: var(--radius); padding: 0.6rem 0.9rem; }
 legend { font-weight: 600; padding: 0 0.3rem; }
 .statuses .status-choice { min-height: 44px; }
 
@@ -172,11 +177,13 @@ blockquote.last { margin: 0 0 1rem; padding: 0.5rem 0.9rem; border-left: 4px sol
 blockquote.last p { margin: 0.2rem 0; white-space: pre-line; }
 
 .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 0.5rem 1.5rem; margin: 0 0 1rem; }
+.facts .wide { grid-column: 1 / -1; max-width: 70ch; }
 .facts dt { color: var(--muted); font-size: 0.85rem; }
 .facts dd { margin: 0; }
-.history { list-style: none; padding: 0; }
-.history li { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 0.6rem 0.9rem; margin-bottom: 0.6rem; }
+.history { list-style: none; margin: 0; padding: 0; }
+.history li { padding: 0.6rem 0; border-top: 1px solid var(--line); }
 .history p { margin: 0.2rem 0; }
+.history .update-text { display: block; -webkit-line-clamp: none; overflow: visible; }
 .plain { padding-left: 1.2rem; }
 
 .pick { margin: 0 0 0.5rem; }
@@ -224,4 +231,6 @@ table.roster form { margin: 0; }
   .segmented button { min-height: 44px; }
   table.roster { display: block; overflow-x: auto; }
   button, .button { min-height: 44px; }
+  .stack label.check { min-height: 44px; }
+  .chip { display: inline-flex; align-items: center; min-height: 44px; }
 }

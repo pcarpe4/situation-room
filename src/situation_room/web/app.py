@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import sys
 from datetime import date, datetime
 from pathlib import Path
@@ -123,6 +124,9 @@ def _templates(cfg: Config, clock: Clock) -> Jinja2Templates:
     env.globals["Status"] = Status
     env.globals["LineAction"] = LineAction
     env.globals["today"] = clock.today
+    # The stylesheet URL carries a hash of its content, so a deploy that changes the CSS
+    # never pairs new pages with a stylesheet the browser cached earlier.
+    env.globals["css_version"] = hashlib.sha256((HERE / "static" / "app.css").read_bytes()).hexdigest()[:12]
     return templates
 
 
