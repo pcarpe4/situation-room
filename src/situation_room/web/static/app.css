@@ -64,6 +64,10 @@ a { color: var(--accent); }
 h1 { font-size: 1.5rem; margin: 0.5rem 0 1rem; }
 h2 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
 code { font-size: 0.9em; }
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
 
 .devbar { background: var(--warn-bg); text-align: center; font-size: 0.85rem; padding: 2px 8px; }
 

@@ -10,6 +10,7 @@
   ('due', 'Due this week', 'firedrill'),
   ('overdue', 'Overdue', 'firedrill'),
 ] %}
+<h1 class="visually-hidden">Board</h1>
 <nav class="chips" aria-label="Filters">
   {% for key, label, noun in chips %}
     {% set n = board.counts[key] %}
