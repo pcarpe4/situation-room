@@ -147,7 +147,10 @@ def dev(port: int, load_sample: bool) -> None:
     import uvicorn
     print(f"sr: open {os.environ['SR_PUBLIC_URL']}")
     uvicorn.run("situation_room.web.app:app_from_env", factory=True, host="127.0.0.1", port=port,
-                reload=True, reload_dirs=[str(PACKAGE_DIR)], log_level="info")
+                reload=True, reload_dirs=[str(PACKAGE_DIR)],
+                # A CSS edit must restart the app so the stylesheet's ?v= hash follows it;
+                # templates need no restart, Jinja re-reads them on change.
+                reload_includes=["*.css"], log_level="info")
 
 
 def serve(host: str, port: int) -> None:

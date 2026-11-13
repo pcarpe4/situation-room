@@ -91,4 +91,4 @@
 - **Effort:** S (human: ~1 hour / CC: ~10 min). Estimated.
 - **Priority:** P2.
 - **Depends on:** Nothing.
-- **Completed:** unversioned (2026-11-12), on design-review-fixes: `app.css` is linked as `/static/app.css?v=<content hash>`. Open review note: `/static` still sends no Cache-Control, so a rolling multi-replica deploy can briefly pair a new hash with old CSS.
+- **Completed:** unversioned (2026-11-12), on design-review-fixes: `app.css` is linked as `/static/app.css?v=<content hash>`. Follow-up (2026-11-12): `/static/app.css` is cached `immutable` for a year only when `?v=` matches the serving process's hash, and `no-cache` otherwise, so a rolling deploy can't cache old CSS under a new hash; `sr dev` restarts on `*.css` edits so the hash follows the file.
