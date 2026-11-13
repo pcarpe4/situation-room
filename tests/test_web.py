@@ -84,7 +84,7 @@ def test_create_ask_and_answer_through_the_pages(db, clock, client, people):
     r = client.post(f"/a/{a.public_id}/ask", data={"csrf_token": token, "back": "/board"}, follow_redirects=False)
     assert r.status_code == 303
     board_html = client.get("/board").text
-    assert "Open the email" in board_html and "Sent it?" in board_html
+    assert "Did your ask to <strong>Ann Manager</strong> go out?" in board_html and "Open the email" in board_html
     link = re.search(r'href="(mailto:[^"]+)"', board_html).group(1)
     decoded = unquote(link.replace("&amp;", "&"))
     for status in ("on_track", "at_risk", "blocked", "done"):
@@ -222,7 +222,7 @@ def test_a_lead_keeps_sent_it_after_triage_asks_too(db, clock, client, people):
     db.commit()
     sign_in(client, people.lead)
     html = client.get("/board").text
-    assert "Sent it?" in html and f'action="/asks/{mine.id}/sent"' in html
+    assert "go out?" in html and f'action="/asks/{mine.id}/sent"' in html
     # Value: protects=the cancel button beside 'Sent it?' says it cancels the ask (FINDING-011);
     # fails_when=the label goes back to a bare 'Cancel' or the cancel form drops out; why_new=no test
     # rendered the cancel-ask control at all; seam=none; no_claim=styling of the quiet button
@@ -235,7 +235,7 @@ def test_the_board_has_one_page_heading(client, people):
     # seam=none; no_claim=that the heading is visually hidden (CSS)
     sign_in(client, people.lead)
     html = client.get("/board").text
-    assert re.findall(r"<h1\b[^>]*>(.*?)</h1>", html) == ["Board"]
+    assert re.findall(r"<h1\b[^>]*>(.*?)</h1>", html) == ["Nothing needs you right now"]
 
 
 def test_navigation_follows_policy(client, people):
@@ -290,10 +290,10 @@ def test_setting_a_wait_moves_the_line_to_waiting(db, clock, client, people):
 
     client.cookies.clear()
     sign_in(client, people.lead)
-    board_html = client.get("/board?filter=waiting").text
-    assert "Waiting until Mon Nov 16" in board_html and "Vendor ships the patch Monday" in board_html
-    assert "Ask anyway" in board_html
-    assert "Waiting · 1 owner" in board_html
+    page = client.get(f"/f/{f.public_id}").text
+    assert "Waiting until Mon Nov 16" in page and "Vendor ships the patch Monday" in page
+    assert "Ask anyway" in page
+    assert "0 of 1 done · 1 waiting" in client.get("/board").text
 
 
 def test_a_wait_error_keeps_what_was_typed(db, clock, client, people):
@@ -355,10 +355,11 @@ def test_a_stale_line_leaves_the_stale_filter_when_it_waits(db, clock, client, p
     clock.set(datetime(2026, 11, 11, 10))
     a = db.scalar(select(Assignment).where(Assignment.firedrill_id == f.id))
     sign_in(client, people.ann)
-    assert "Stale · 1 owner" in client.get("/board").text
+    board_html = client.get("/board").text
+    assert "needs your update." in board_html and f'href="/a/{a.public_id}/update"' in board_html
     client.post(f"/a/{a.public_id}/wait", data={**_wait_form(client, a), "until": "2026-11-16", "reason": "Vendor"})
-    board_html = client.get("/board?filter=stale").text
-    assert "Nothing is stale." in board_html and "Waiting · 1 owner" in board_html
+    board_html = client.get("/board").text
+    assert f'href="/a/{a.public_id}/update"' not in board_html and "1 waiting" in board_html
 
 
 def test_a_manager_cannot_set_a_wait_on_someone_elses_line(db, clock, client, people):

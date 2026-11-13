@@ -184,7 +184,7 @@ def test_the_audit_log_holds_ids_not_text(db, clock, people):
         assert "Rotate passwords" not in str(entry.detail)
 
 
-def test_board_marks_stale_waiting_and_sorts_stale_first(db, clock, people):
+def test_board_marks_stale_and_waiting_lines(db, clock, people):
     stale = make(db, clock, people, title="Old one", owners=[people.ann])
     fresh_blocked = make(db, clock, people, title="Blocked one", owners=[people.bob])
     clock.advance(days=7)  # Wednesday to the next Wednesday: five working days.
@@ -193,15 +193,17 @@ def test_board_marks_stale_waiting_and_sorts_stale_first(db, clock, people):
     db.commit()
 
     view = board.build(db, clock, 3, people.lead)
-    assert [r.title for r in view.rows] == ["Old one", "Blocked one"]
-    assert view.rows[0].lines[0].stale and view.rows[0].lines[0].stale_days == 5
-    assert view.counts["stale"] == 1
+    old = next(r for r in view.rows if r.title == "Old one")
+    assert old.lines[0].stale and old.lines[0].stale_days == 5 and old.lines[0].kind == "silent"
+    assert view.summary == "One owner has gone quiet."
 
     a = assignment_of(db, stale, people.ann)
     domain.set_wait(db, clock, people.ann, a.public_id, until=clock.today() + timedelta(days=2), reason="Vendor")
     db.commit()
     view = board.build(db, clock, 3, people.lead)
-    assert view.counts["stale"] == 0 and view.counts["waiting"] == 1
+    old = next(r for r in view.rows if r.title == "Old one")
+    assert not old.lines[0].stale and old.lines[0].kind == "waiting"
+    assert view.summary == "Nothing is overdue, and every owner has posted recently."
 
 
 def test_rollup_ignores_done_unless_all_done():

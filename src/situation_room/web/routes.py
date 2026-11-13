@@ -15,7 +15,7 @@ from .. import board as board_mod
 from .. import domain, mailto
 from ..models import Assignment, Firedrill, FiredrillState, Person, Role, Status, Update, UpdateRequest
 from ..policy import Action, can
-from .render import THEME_COOKIE, THEMES, render
+from .render import FOCUS_COOKIE, THEME_COOKIE, THEMES, render
 from .security import Refused, current_person, get_db, safe_next
 
 router = APIRouter()
@@ -86,6 +86,18 @@ def set_theme(request: Request, theme: str = Form("system"), back: str = Form("/
                             secure=_cfg(request).public_url.startswith("https://"))
     else:
         response.delete_cookie(THEME_COOKIE)
+    return response
+
+
+@router.post("/focus")
+def set_focus(request: Request, focus: str = Form("off"), back: str = Form("/board")):
+    """Focus mode tucks the board's list away so only what needs you shows. Kept like the theme."""
+    response = _see_other(safe_next(back, "/board"))
+    if focus == "on":
+        response.set_cookie(FOCUS_COOKIE, "on", max_age=400 * 24 * 3600, httponly=True, samesite="lax",
+                            secure=_cfg(request).public_url.startswith("https://"))
+    else:
+        response.delete_cookie(FOCUS_COOKIE)
     return response
 
 
