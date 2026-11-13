@@ -14,7 +14,10 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import Engine
 from sqlalchemy.exc import OperationalError
+from starlette.datastructures import QueryParams
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.responses import Response
+from starlette.types import Scope
 
 from .. import config as config_mod
 from ..board import STATUS_LABELS, LineAction
@@ -46,7 +49,8 @@ def create_app(cfg: Config, *, clock: Clock | None = None, engine: Engine | None
     app.state.clock = clock
     app.state.engine = engine
     app.state.sessionmaker = make_sessionmaker(engine)
-    app.state.templates = _templates(cfg, clock)
+    css_version = _css_version()
+    app.state.templates = _templates(cfg, clock, css_version)
 
     app.add_middleware(
         SessionMiddleware, secret_key=cfg.secret_key, session_cookie="sr_session",
@@ -81,12 +85,39 @@ def create_app(cfg: Config, *, clock: Clock | None = None, engine: Engine | None
         response.headers["Retry-After"] = "30"
         return response
 
-    app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
+    app.mount("/static", _Static(directory=HERE / "static", css_version=css_version), name="static")
     app.include_router(routes.router)
     return app
 
 
-def _templates(cfg: Config, clock: Clock) -> Jinja2Templates:
+def _css_version() -> str:
+    """The stylesheet URL carries a hash of its content, so a deploy that changes the CSS
+    never pairs new pages with a stylesheet the browser cached earlier."""
+    return hashlib.sha256((HERE / "static" / "app.css").read_bytes()).hexdigest()[:12]
+
+
+class _Static(StaticFiles):
+    """Lets browsers keep app.css for a year, but only under the URL that names this copy.
+
+    During a rolling deploy an old replica can be asked for `?v=<new hash>`; it answers with
+    `no-cache`, so the browser never stores old CSS under the new URL.
+    """
+
+    def __init__(self, *, directory: Path, css_version: str) -> None:
+        super().__init__(directory=directory)
+        self.css_version = css_version
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        response = await super().get_response(path, scope)
+        version = QueryParams(scope["query_string"]).get("v")
+        if path == "app.css" and version == self.css_version:
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        else:
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+def _templates(cfg: Config, clock: Clock, css_version: str) -> Jinja2Templates:
     templates = Jinja2Templates(directory=HERE / "templates")
     env = templates.env
 
@@ -124,9 +155,7 @@ def _templates(cfg: Config, clock: Clock) -> Jinja2Templates:
     env.globals["Status"] = Status
     env.globals["LineAction"] = LineAction
     env.globals["today"] = clock.today
-    # The stylesheet URL carries a hash of its content, so a deploy that changes the CSS
-    # never pairs new pages with a stylesheet the browser cached earlier.
-    env.globals["css_version"] = hashlib.sha256((HERE / "static" / "app.css").read_bytes()).hexdigest()[:12]
+    env.globals["css_version"] = css_version
     return templates
 
 

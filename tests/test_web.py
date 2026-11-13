@@ -177,6 +177,22 @@ def test_pages_link_the_stylesheet_by_a_hash_of_its_content(client):
     assert client.get(f"/static/app.css?v={_css_version(client)}").status_code == 200
 
 
+def test_the_stylesheet_is_cached_for_good_only_under_its_own_hash(client):
+    # Value: protects=browsers keep app.css for a year under the hashed URL, but a replica with
+    # different CSS (rolling deploy) or a bare URL never gets cached as immutable;
+    # fails_when=Cache-Control is missing, or immutable is sent for a hash this process didn't
+    # compute; why_new=PR #20 review notes; seam=none; no_claim=a real browser or CDN cache
+    version = _css_version(client)
+    ok = client.get(f"/static/app.css?v={version}")
+    assert ok.status_code == 200
+    assert ok.headers["cache-control"] == "public, max-age=31536000, immutable"
+    assert ok.headers["x-content-type-options"] == "nosniff"
+    for url in ("/static/app.css?v=000000000000", "/static/app.css"):
+        r = client.get(url)
+        assert r.status_code == 200, url
+        assert r.headers["cache-control"] == "no-cache", url
+
+
 def test_theme_defaults_to_system(client):
     html = client.get("/signin").text
     assert "data-theme" not in html.split("<head>")[0]
