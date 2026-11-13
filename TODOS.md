@@ -58,3 +58,34 @@
 - **Priority:** P3.
 - **Depends on:** Milestone 1, and a named caller.
 - **Revisit when:** A named system needs to read or post firedrill status.
+
+## Version the stylesheet URL
+
+- **What:** Serve `app.css` with a content hash in its URL (for example `/static/app.css?v=<hash>`) set at startup.
+- **Why:** The page links the stylesheet with no version, so a browser can keep the old CSS after a deploy and show new templates with old styles. The /design-review run on 2026-11-12 hit this: fixes did not show until a forced reload.
+- **Effort:** S (human: ~1 hour / CC: ~10 min). Estimated.
+- **Priority:** P2.
+- **Depends on:** Nothing.
+
+## Tell On track apart from Done at a glance
+
+- **What:** Give the Done badge its own look (neutral or outlined) instead of the same green as On track.
+- **Why:** Both badges share `--changed` / `--changed-bg`, so scanning a firedrill you cannot tell finished owners from ones still working. Found by the /design-review run on 2026-11-12 (FINDING-018, medium, color).
+- **Context:** Deferred by the author: it changes the status color language people already read. `.status-on_track, .status-done` in `app.css`.
+- **Effort:** S (human: ~1 hour / CC: ~10 min). Estimated.
+- **Priority:** P3.
+
+## Shorter header on phones
+
+- **What:** On narrow screens, fit the header into one or two rows, for example by moving the theme picker out of the header.
+- **Why:** On a 375px phone the header takes about 180px (four rows) before any firedrill shows. "Sent it?" also ends up alone at the end of a line above Yes / Cancel ask. Found by the /design-review run on 2026-11-12 (FINDING-012, medium, responsive).
+- **Context:** Deferred by the author because it moves controls people know; needs a layout choice first.
+- **Effort:** S (human: ~half a day / CC: ~20 min). Estimated.
+- **Priority:** P3.
+
+## A small design system: DESIGN.md, type and spacing scale
+
+- **What:** Write a DESIGN.md that records the tokens `app.css` already has, picks a body typeface or deliberately keeps `system-ui`, and adds spacing and font-size tokens.
+- **Why:** Colors are tokens, but spacing uses about 15 one-off rem values and font sizes are ad hoc, so each new screen invents its own. The /design-review run on 2026-11-12 also kept the 4px red edge on stale cards on purpose (the detector flags it as a common AI-generated pattern); a DESIGN.md is where that choice should be written down.
+- **Effort:** S (human: ~1 day / CC: ~30 min with /design-consultation). Estimated.
+- **Priority:** P3.
