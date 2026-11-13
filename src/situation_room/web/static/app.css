@@ -162,7 +162,7 @@ button:focus-visible, .button:focus-visible, a:focus-visible, input:focus-visibl
 .stack { display: flex; flex-direction: column; gap: 0.9rem; }
 .stack label { display: flex; flex-direction: column; gap: 0.25rem; font-weight: 600; }
 .stack label.check, .stack label.status-choice { flex-direction: row; align-items: center; gap: 0.5rem; font-weight: 400; }
-.two { display: grid; grid-template-columns: 1fr 1fr; gap: 0.9rem; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 0.9rem; align-items: end; }
 .req { font-weight: 400; color: var(--muted); font-size: 0.85rem; }
 input, textarea, select {
   font: inherit; font-weight: 400; padding: 0.45rem 0.6rem; border: 1px solid var(--line); border-radius: var(--radius);
