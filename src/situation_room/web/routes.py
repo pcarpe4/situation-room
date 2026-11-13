@@ -133,7 +133,7 @@ def _owner_choices(db: Session) -> list[Person]:
 @router.get("/firedrills/new")
 def new_firedrill_page(request: Request, me: Person = Depends(current_person), db: Session = Depends(get_db)):
     _require(me, Action.CREATE_FIREDRILL)
-    return render(request, "new_firedrill.html", owners=_owner_choices(db), form={}, chosen=set(), error=None)
+    return render(request, "new_firedrill.html", owners=_owner_choices(db), form={}, chosen=set(), error=None, tab="new")
 
 
 @router.post("/firedrills/new")
@@ -152,11 +152,11 @@ async def create_firedrill(request: Request, me: Person = Depends(current_person
     except ValueError:
         db.rollback()
         return render(request, "new_firedrill.html", status_code=400, owners=_owner_choices(db),
-                      form=values, chosen=chosen, error="Due date is not a valid date.")
+                      form=values, chosen=chosen, error="Due date is not a valid date.", tab="new")
     except domain.DomainError as exc:
         db.rollback()
         return render(request, "new_firedrill.html", status_code=exc.http_status, owners=_owner_choices(db),
-                      form=values, chosen=chosen, error=exc.message)
+                      form=values, chosen=chosen, error=exc.message, tab="new")
     db.commit()
     return _see_other(f"/f/{firedrill.public_id}")
 

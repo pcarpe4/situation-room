@@ -14,7 +14,7 @@
     <nav aria-label="Main">
       <a href="/mine" {% if tab == 'mine' %}aria-current="page"{% endif %}>My assignments</a>
       <a href="/board" {% if tab == 'board' %}aria-current="page"{% endif %}>Board</a>
-      {% if can('create_firedrill') %}<a href="/firedrills/new">New firedrill</a>{% endif %}
+      {% if can('create_firedrill') %}<a href="/firedrills/new" {% if tab == 'new' %}aria-current="page"{% endif %}>New firedrill</a>{% endif %}
       {% if can('manage_roster') %}<a href="/roster" {% if tab == 'roster' %}aria-current="page"{% endif %}>Roster</a>{% endif %}
     </nav>
     {% endif %}
