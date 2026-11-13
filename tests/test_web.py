@@ -216,6 +216,15 @@ def test_navigation_follows_policy(client, people):
     assert 'href="/firedrills/new"' in html and 'href="/roster"' in html
 
 
+def test_the_new_firedrill_page_marks_its_nav_link_current(client, people):
+    token = sign_in(client, people.lead)
+    current = 'href="/firedrills/new" aria-current="page"'
+    assert current in client.get("/firedrills/new").text
+    r = client.post("/firedrills/new", data={"csrf_token": token, "title": "Keep me", "short_description": "And me"})
+    assert r.status_code == 400 and current in r.text
+    assert current not in client.get("/board").text
+
+
 def test_the_update_page_offers_a_wait(db, clock, client, people):
     f = make(db, clock, people)
     a = db.scalar(select(Assignment).where(Assignment.firedrill_id == f.id))
