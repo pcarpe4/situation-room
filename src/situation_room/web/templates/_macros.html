@@ -15,7 +15,7 @@
   <a class="button" href="{{ ask_link(row, line) }}">Open the email</a>
   <span class="ask-state">Sent it?</span>
   <form method="post" action="/asks/{{ line.ask.id }}/sent">{{ hidden(back) }}<button type="submit">Yes</button></form>
-  {% if LineAction.CANCEL_ASK in line.actions %}<form method="post" action="/asks/{{ line.ask.id }}/cancel">{{ hidden(back) }}<button class="quiet" type="submit">Cancel</button></form>{% endif %}
+  {% if LineAction.CANCEL_ASK in line.actions %}<form method="post" action="/asks/{{ line.ask.id }}/cancel">{{ hidden(back) }}<button class="quiet" type="submit">Cancel ask</button></form>{% endif %}
 {% elif LineAction.ASK_AGAIN in line.actions %}
   <span class="ask-state">Asked {{ line.ask.requested_at|ago }}, {{ 'no reply' if line.ask.sent else 'not emailed yet' }}</span>
   <form method="post" action="/a/{{ line.assignment_id }}/ask">{{ hidden(back) }}<button class="quiet" type="submit">Ask again</button></form>
