@@ -204,6 +204,19 @@ def test_a_lead_keeps_sent_it_after_triage_asks_too(db, clock, client, people):
     sign_in(client, people.lead)
     html = client.get("/board").text
     assert "Sent it?" in html and f'action="/asks/{mine.id}/sent"' in html
+    # Value: protects=the cancel button beside 'Sent it?' says it cancels the ask (FINDING-011);
+    # fails_when=the label goes back to a bare 'Cancel' or the cancel form drops out; why_new=no test
+    # rendered the cancel-ask control at all; seam=none; no_claim=styling of the quiet button
+    assert re.search(rf'action="/asks/{mine.id}/cancel">(?:(?!</form>).)*>Cancel ask</button>', html, re.S)
+
+
+def test_the_board_has_one_page_heading(client, people):
+    # Value: protects=the board exposes a single page-level h1 for screen-reader heading navigation;
+    # fails_when=the hidden h1 is removed or a second h1 is added; why_new=no test checked board headings;
+    # seam=none; no_claim=that the heading is visually hidden (CSS)
+    sign_in(client, people.lead)
+    html = client.get("/board").text
+    assert re.findall(r"<h1\b[^>]*>(.*?)</h1>", html) == ["Board"]
 
 
 def test_navigation_follows_policy(client, people):
@@ -222,6 +235,13 @@ def test_the_new_firedrill_page_marks_its_nav_link_current(client, people):
     assert current in client.get("/firedrills/new").text
     r = client.post("/firedrills/new", data={"csrf_token": token, "title": "Keep me", "short_description": "And me"})
     assert r.status_code == 400 and current in r.text
+    # Value: protects=the bad-due-date re-render keeps its error and the current nav mark; fails_when=tab="new"
+    # is dropped from the ValueError branch or that branch stops rendering the form; why_new=only the
+    # DomainError branch was exercised; seam=none; no_claim=browser date-picker validation
+    r = client.post("/firedrills/new", data={"csrf_token": token, "title": "Keep me", "short_description": "And me",
+                                             "due_date": "2026-02-30"})
+    assert r.status_code == 400 and "Due date is not a valid date." in r.text and current in r.text
+    assert 'value="Keep me"' in r.text
     assert current not in client.get("/board").text
 
 
