@@ -204,4 +204,5 @@ table.roster form { margin: 0; }
   table.roster { display: block; overflow-x: auto; }
   button, .button { min-height: 44px; }
   .stack label.check { min-height: 44px; }
+  .chip { display: inline-flex; align-items: center; min-height: 44px; }
 }
