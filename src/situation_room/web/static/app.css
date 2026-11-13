@@ -173,6 +173,7 @@ blockquote.last { margin: 0 0 1rem; padding: 0.5rem 0.9rem; border-left: 4px sol
 blockquote.last p { margin: 0.2rem 0; white-space: pre-line; }
 
 .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 0.5rem 1.5rem; margin: 0 0 1rem; }
+.facts .wide { grid-column: 1 / -1; max-width: 70ch; }
 .facts dt { color: var(--muted); font-size: 0.85rem; }
 .facts dd { margin: 0; }
 .history { list-style: none; padding: 0; }

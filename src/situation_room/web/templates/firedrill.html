@@ -5,7 +5,7 @@
 <p class="crumb"><a href="/board">Board</a></p>
 <h1>{{ firedrill.title }}</h1>
 <dl class="facts">
-  <div><dt>Description</dt><dd>{{ firedrill.short_description }}</dd></div>
+  <div class="wide"><dt>Description</dt><dd>{{ firedrill.short_description }}</dd></div>
   {% if firedrill.due_date %}<div><dt>Due</dt><dd>{{ firedrill.due_date|day }}{% if row and row.overdue_days %} <span class="badge action">Overdue {{ row.overdue_days }}d</span>{% endif %}</dd></div>{% endif %}
   {% if firedrill.source %}<div><dt>From</dt><dd>{{ firedrill.source }}</dd></div>{% endif %}
   {% if firedrill.requested_by %}<div><dt>Requested by</dt><dd>{{ firedrill.requested_by }}</dd></div>{% endif %}
