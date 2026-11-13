@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Situation Room{% endblock %}</title>
-  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/app.css?v={{ css_version }}">
 </head>
 <body>
   {% if cfg.is_dev_signin %}<div class="devbar">Development sign-in. Not for real data.</div>{% endif %}

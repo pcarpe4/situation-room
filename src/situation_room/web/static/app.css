@@ -132,7 +132,7 @@ button:focus-visible, .button:focus-visible, a:focus-visible, input:focus-visibl
 .line-body p { margin: 0; }
 .update-text {
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
-  white-space: pre-line;
+  white-space: pre-line; overflow-wrap: anywhere;
 }
 .meta { color: var(--muted); font-size: 0.85rem; }
 .more { margin: 0.4rem 0 0; }

@@ -1,3 +1,4 @@
+import hashlib
 import re
 from datetime import datetime
 from urllib.parse import unquote
@@ -153,9 +154,27 @@ def test_the_database_being_down_shows_the_outage_page(cfg, clock):
     dead = create_engine("postgresql+psycopg://postgres@/nope?host=/nonexistent", hide_parameters=True)
     with TestClient(create_app(cfg, clock=clock, engine=dead)) as c:
         r = c.get("/signin")
+        version = _css_version(c)
     assert r.status_code == 503
     assert r.headers["retry-after"] == "30"
     assert "unavailable" in r.text
+    assert f"/static/app.css?v={version}" in r.text
+
+
+def _css_version(client):
+    css = client.get("/static/app.css")
+    assert css.status_code == 200
+    return hashlib.sha256(css.content).hexdigest()[:12]
+
+
+def test_pages_link_the_stylesheet_by_a_hash_of_its_content(client):
+    # Value: protects=a deploy that changes app.css changes its URL, so browsers never pair new
+    # markup (e.g. the hidden board h1) with cached old CSS; fails_when=the link loses its ?v= or
+    # the hash stops tracking the served file; why_new=no test covered the stylesheet link;
+    # seam=none; no_claim=browser cache headers or a real cache
+    html = client.get("/signin").text
+    assert f'href="/static/app.css?v={_css_version(client)}"' in html
+    assert client.get(f"/static/app.css?v={_css_version(client)}").status_code == 200
 
 
 def test_theme_defaults_to_system(client):
