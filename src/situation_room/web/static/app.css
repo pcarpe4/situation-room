@@ -111,7 +111,8 @@ button:focus-visible, .button:focus-visible, a:focus-visible, input:focus-visibl
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
   padding: 0.9rem 1rem; margin-bottom: 0.9rem;
 }
-.row.is-stale { border-left: 4px solid var(--action); }
+/* The thicker edge takes its 3 extra pixels from the padding, so text lines up with the other cards. */
+.row.is-stale { border-left: 4px solid var(--action); padding-left: calc(1rem - 3px); }
 .row h2 { margin: 0; font-size: 1.1rem; }
 .row h2 a { color: var(--text); }
 .row-meta { display: flex; flex-wrap: wrap; gap: 0.75rem; color: var(--muted); font-size: 0.9rem; margin-top: 0.2rem; }
