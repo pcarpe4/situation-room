@@ -19,6 +19,8 @@ Open http://localhost:8000 and pick a sample person to sign in as. `sr dev` star
 uv run pytest        # tests run on a real Postgres too
 ```
 
+CI runs the same `uv run pytest` on every pull request and on pushes to `main` (`.github/workflows/tests.yml`).
+
 ## The one rule
 
 Everything is an event on an assignment. A firedrill has one assignment per owner. Updates, asks and waits belong to an assignment. Only `situation_room/domain.py` changes firedrills, assignments, updates and asks. Pages, and later the jobs, call it and never write those tables themselves.
