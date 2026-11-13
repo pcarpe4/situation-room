@@ -136,7 +136,7 @@ def test_the_seeded_board_renders_for_every_role(db, clock, client, people):
     for person in (people.lead, people.ann, people.triage):
         client.cookies.clear()
         sign_in(client, person)
-        for path in ("/board", "/mine", "/board?filter=stale", "/board?filter=waiting", "/board?filter=overdue"):
+        for path in ("/board", "/mine", "/calendar", "/board?filter=stale", "/board?filter=waiting", "/board?filter=overdue"):
             assert client.get(path).status_code == 200, (person.display_name, path)
     f = db.scalar(select(Firedrill).limit(1))
     assert client.get(f"/f/{f.public_id}").status_code == 200
