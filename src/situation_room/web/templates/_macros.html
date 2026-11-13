@@ -73,6 +73,5 @@
   <ul class="lines">
     {% for line in row.lines %}{{ owner_line(row, line, back) }}{% endfor %}
   </ul>
-  {% if row.hidden_owners %}<p class="meta more">+{{ row.hidden_owners }} other {{ 'owner' if row.hidden_owners == 1 else 'owners' }}</p>{% endif %}
 </article>
 {%- endmacro %}

@@ -9,6 +9,7 @@ from .security import csrf_token
 
 THEME_COOKIE = "sr_theme"
 THEMES = ("light", "dark", "system")
+FOCUS_COOKIE = "sr_focus"
 
 
 def theme_of(request: Request) -> str:
@@ -25,6 +26,7 @@ def render(request: Request, name: str, status_code: int = 200, **context: objec
     context["cfg"] = request.app.state.cfg
     context["csrf_token"] = csrf_token(request)
     context["theme"] = theme_of(request)
+    context["focus"] = request.cookies.get(FOCUS_COOKIE) == "on"
     # Where the theme form returns to: this page, unless it was the result of a POST.
     url = request.url
     context["here"] = (url.path + (f"?{url.query}" if url.query else "")) if request.method == "GET" else "/"

@@ -72,12 +72,10 @@ def test_asked_counts_only_asks_that_were_emailed(db, clock, people):
     a = assignment_of(db, make(db, clock, people), people.ann)
     unsent = domain.request_update(db, clock, people.lead, a.public_id)
     db.commit()
-    view = board.build(db, clock, 3, people.lead, "asked")
-    assert view.counts["asked"] == 0 and view.rows == []
+    assert not board.build(db, clock, 3, people.lead).rows[0].lines[0].asked
     domain.confirm_ask_sent(db, clock, people.lead, unsent.id)
     db.commit()
-    view = board.build(db, clock, 3, people.lead, "asked")
-    assert view.counts["asked"] == 1 and len(view.rows) == 1
+    assert board.build(db, clock, 3, people.lead).rows[0].lines[0].asked
 
 
 def test_a_newer_ask_by_someone_else_does_not_hide_my_unsent_one(db, clock, people):

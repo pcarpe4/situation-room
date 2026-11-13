@@ -7,36 +7,58 @@
   <link rel="stylesheet" href="/static/app.css?v={{ css_version }}">
 </head>
 <body>
+  {%- macro theme_form() %}
+  <form method="post" action="/theme" class="theme">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="back" value="{{ here }}">
+    <span class="theme-label" id="theme-label">Theme</span>
+    <span class="segmented" role="group" aria-labelledby="theme-label">
+    {%- for value, label in [('light', 'Light'), ('dark', 'Dark'), ('system', 'System')] %}
+      <button type="submit" name="theme" value="{{ value }}" aria-pressed="{{ 'true' if theme == value else 'false' }}">{{ label }}</button>
+    {%- endfor %}
+    </span>
+  </form>
+  {%- endmacro %}
   {% if cfg.is_dev_signin %}<div class="devbar">Development sign-in. Not for real data.</div>{% endif %}
   <header class="top">
-    <a class="brand" href="/">Situation Room</a>
-    {% if me %}
-    <nav aria-label="Main">
-      <a href="/mine" {% if tab == 'mine' %}aria-current="page"{% endif %}>My assignments</a>
-      <a href="/board" {% if tab == 'board' %}aria-current="page"{% endif %}>Board</a>
-      <a href="/calendar" {% if tab == 'calendar' %}aria-current="page"{% endif %}>Calendar</a>
-      {% if can('create_firedrill') %}<a href="/firedrills/new" {% if tab == 'new' %}aria-current="page"{% endif %}>New firedrill</a>{% endif %}
-      {% if can('manage_roster') %}<a href="/roster" {% if tab == 'roster' %}aria-current="page"{% endif %}>Roster</a>{% endif %}
-    </nav>
-    {% endif %}
-    <div class="tools">
-      <form method="post" action="/theme" class="theme">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <input type="hidden" name="back" value="{{ here }}">
-        <span class="theme-label" id="theme-label">Theme</span>
-        <span class="segmented" role="group" aria-labelledby="theme-label">
-        {%- for value, label in [('light', 'Light'), ('dark', 'Dark'), ('system', 'System')] %}
-          <button type="submit" name="theme" value="{{ value }}" aria-pressed="{{ 'true' if theme == value else 'false' }}">{{ label }}</button>
-        {%- endfor %}
-        </span>
-      </form>
+    <div class="top-in">
+      <a class="brand" href="/">
+        <span class="mark" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.5"/></svg></span>
+        Situation Room
+      </a>
       {% if me %}
-      <form method="post" action="/signout" class="who">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <span>{{ me.display_name }} · {{ me.role.value|capitalize }}</span>
-        <button class="quiet" type="submit">Sign out</button>
-      </form>
+      <nav aria-label="Main">
+        <a href="/mine" {% if tab == 'mine' %}aria-current="page"{% endif %}>My assignments</a>
+        <a href="/board" {% if tab == 'board' %}aria-current="page"{% endif %}>Board</a>
+        <a href="/calendar" {% if tab == 'calendar' %}aria-current="page"{% endif %}>Calendar</a>
+        {% if can('manage_roster') %}<a href="/roster" {% if tab == 'roster' %}aria-current="page"{% endif %}>Roster</a>{% endif %}
+      </nav>
       {% endif %}
+      <div class="tools">
+        {% block tools %}{% endblock %}
+        {% if me %}
+          {% if can('create_firedrill') %}
+          <a class="button new" href="/firedrills/new"{% if tab == 'new' %} aria-current="page"{% endif %}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+            <span class="new-label">New firedrill</span>
+          </a>
+          {% endif %}
+          {% set initials = me.display_name.split()[:2]|map('first')|join|upper %}
+          <details class="account">
+            <summary aria-label="{{ me.display_name }}, {{ me.role.value|capitalize }}. Account and theme">{{ initials }}</summary>
+            <div class="menu">
+              <p class="menu-who"><strong>{{ me.display_name }}</strong><span class="meta">{{ me.role.value|capitalize }}</span></p>
+              {{ theme_form() }}
+              <form method="post" action="/signout" class="who">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button class="quiet" type="submit">Sign out</button>
+              </form>
+            </div>
+          </details>
+        {% else %}
+          {{ theme_form() }}
+        {% endif %}
+      </div>
     </div>
   </header>
   <main>

@@ -1,50 +1,237 @@
 {% extends "base.html" %}
-{% from "_macros.html" import firedrill_row with context %}
 {% block title %}Board · Situation Room{% endblock %}
-{% block content %}
-{% set chips = [
-  ('open', 'Open', 'firedrill'),
-  ('stale', 'Stale', 'owner'),
-  ('asked', 'Asked, no reply', 'owner'),
-  ('waiting', 'Waiting', 'owner'),
-  ('due', 'Due this week', 'firedrill'),
-  ('overdue', 'Overdue', 'firedrill'),
-] %}
-<h1 class="visually-hidden">Board</h1>
-<nav class="chips" aria-label="Filters">
-  {% for key, label, noun in chips %}
-    {% set n = board.counts[key] %}
-    {% set unit = noun if n == 1 else noun ~ 's' %}
-    {% if key == board.active_filter %}
-      <span class="chip active" aria-current="true">{{ label }} · {{ n }} {{ unit }}</span>
-    {% elif n == 0 and key != 'open' %}
-      <span class="chip disabled">{{ label }} · 0</span>
+
+{% block tools %}
+<form method="post" action="/focus" class="focus-toggle">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="back" value="{{ here }}">
+  <button type="submit" name="focus" value="{{ 'off' if focus else 'on' }}" aria-pressed="{{ 'true' if focus else 'false' }}">
+    <span class="switch" aria-hidden="true"></span>Focus mode
+  </button>
+</form>
+{% endblock %}
+
+{% macro hidden(back) -%}
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+<input type="hidden" name="back" value="{{ back }}">
+{%- endmacro %}
+
+{% macro arrow_icon() -%}
+<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+{%- endmacro %}
+
+{% macro quote(line) -%}
+{% if line.waiting and line.waiting_reason %}
+<p class="quote">“{{ line.waiting_reason }}”</p>
+{% elif line.last_update_at %}
+<p class="quote">“{{ line.last_update_text or '(no text)' }}” <span class="meta">{{ line.last_update_at|ago }}</span></p>
+{% endif %}
+{%- endmacro %}
+
+{% macro need_item(need, current, back) -%}
+{% set row, line, kind = need.row, need.line, need.kind %}
+<li class="need{% if current %} is-current{% endif %}" id="a-{{ line.assignment_id }}">
+  <div class="need-tag">
+    {% if row.overdue_days %}
+      <span class="tag tag-overdue">{{ row.overdue_days }} {{ 'day' if row.overdue_days == 1 else 'days' }} overdue</span>
+    {% elif line.status == Status.BLOCKED %}
+      <span class="tag tag-blocked">Blocked</span>
+    {% elif line.stale %}
+      <span class="tag tag-quiet">Quiet {{ line.stale_days }} work {{ 'day' if line.stale_days == 1 else 'days' }}</span>
+    {% elif line.status == Status.AT_RISK %}
+      <span class="tag tag-quiet">At risk</span>
+    {% elif kind == NeedKind.CONFIRM %}
+      <span class="tag">Not emailed yet</span>
     {% else %}
-      <a class="chip" href="/board?filter={{ key }}">{{ label }} · {{ n }} {{ unit }}</a>
+      <span class="tag">{{ status_label(line.status) }}</span>
     {% endif %}
-  {% endfor %}
-  {% if board.active_filter != 'open' %}<a class="chip clear" href="/board">Clear filter</a>{% endif %}
-</nav>
+    {% if current %}<span class="start-here">{{ arrow_icon() }}Start here</span>{% endif %}
+  </div>
 
-<p class="result">{{ board.result_line }}</p>
+  <div class="need-body">
+    {% if kind == NeedKind.UPDATE %}
+      <p class="need-say"><a href="/f/{{ row.public_id }}">{{ row.title }}</a> needs your update.</p>
+    {% elif kind == NeedKind.ASK_AGAIN %}
+      <p class="need-say"><strong>{{ line.owner_name }}</strong> hasn't answered {{ 'your' if line.ask.asked_by_id == me.id else 'the' }} ask from {{ line.ask.requested_at|ago }}.</p>
+    {% elif kind == NeedKind.CONFIRM %}
+      <p class="need-say">Did your ask to <strong>{{ line.owner_name }}</strong> go out?</p>
+    {% elif kind == NeedKind.REQUEST %}
+      <p class="need-say"><strong>{{ line.owner_name }}</strong> has gone quiet.</p>
+    {% else %}
+      <p class="need-say"><strong>{{ line.owner_name }}</strong> is blocked.</p>
+    {% endif %}
 
+    <p class="meta need-where">
+      {% if kind == NeedKind.CONFIRM %}You started it {{ line.ask.requested_at|ago }}. <a href="{{ ask_link(row, line) }}">Open the email</a> if it hasn't gone yet.
+      {% elif kind != NeedKind.UPDATE %}<a href="/f/{{ row.public_id }}">{{ row.title }}</a>{% if row.due_date %} · due {{ row.due_date|day }}{% endif %}
+      {% else %}{% if row.due_date %}Due {{ row.due_date|day }}. {% endif %}{% if line.last_update_at %}Your last update was {{ line.last_update_at|ago }}.{% else %}Assigned {{ line.assigned_at|ago }}.{% endif %}
+      {% endif %}
+    </p>
+    {% if kind in (NeedKind.ASK_AGAIN, NeedKind.REQUEST, NeedKind.BLOCKED) %}
+      {% if line.last_update_at or line.waiting_reason %}{{ quote(line) }}
+      {% else %}<p class="quote">No update since it was assigned {{ line.assigned_at|ago }}.</p>{% endif %}
+    {% endif %}
+  </div>
+
+  <div class="need-act">
+    {% set btn = 'primary' if current else '' %}
+    {% if kind == NeedKind.UPDATE %}
+      <a class="button {{ btn }}" href="/a/{{ line.assignment_id }}/update">Post update</a>
+      <span class="hint">Takes a minute</span>
+    {% elif kind == NeedKind.CONFIRM %}
+      <form method="post" action="/asks/{{ line.ask.id }}/sent">{{ hidden(back) }}<button class="{{ btn }}" type="submit">Yes, it's sent</button></form>
+      <form method="post" action="/asks/{{ line.ask.id }}/cancel">{{ hidden(back) }}<button class="link" type="submit">Cancel ask</button></form>
+    {% else %}
+      <form method="post" action="/a/{{ line.assignment_id }}/ask">{{ hidden(back) }}<button class="{{ btn }}" type="submit">{{ 'Ask again' if kind == NeedKind.ASK_AGAIN else 'Request update' }}</button></form>
+      <span class="hint">Next, you send the email</span>
+    {% endif %}
+  </div>
+</li>
+{%- endmacro %}
+
+{% block content %}
 {% set back = '/board' if board.active_filter == 'open' else '/board?filter=' ~ board.active_filter %}
-{% for row in board.rows %}
-  {{ firedrill_row(row, back) }}
-{% else %}
+{% set n = board.needs|length %}
+{% set total = n + board.done_today %}
+
+<div class="board-head">
+  <div class="board-title">
+    <p class="dateline">{{ today().strftime('%A, %B') }} {{ today().day }}</p>
+    <h1>
+      {%- if n %}{{ n }} {{ 'thing needs' if n == 1 else 'things need' }} you today
+      {%- elif board.done_today %}You're clear for today
+      {%- else %}Nothing needs you right now{% endif -%}
+    </h1>
+    {% if board.summary %}<p class="lede">{{ board.summary }}</p>{% endif %}
+  </div>
+
+  <figure class="week">
+    <figcaption>This week</figcaption>
+    <ol>
+      {% for d in board.week %}
+      {% set titles = d.due|map(attribute='title')|join(', ') %}
+      <li class="day{% if d.is_today %} today{% elif d.is_past %} past{% endif %}{% if d.due and not d.is_today %} has-due{% endif %}"{% if titles %} title="{{ titles }}"{% endif %}>
+        <span class="dow" aria-hidden="true">{{ d.day.strftime('%a')[0] }}</span>
+        <span class="num" aria-hidden="true">{{ d.day.day }}</span>
+        <span class="dot{% if d.due %} {{ 'overdue' if d.is_past else 'due' }}{% endif %}" aria-hidden="true"></span>
+        <span class="visually-hidden">{{ d.day|day }}{% if d.is_today %}, today{% endif %}{% if d.due %}: {{ titles }} {{ 'was due' if d.is_past else 'due' }}{% endif %}</span>
+      </li>
+      {% endfor %}
+    </ol>
+  </figure>
+</div>
+
+<section class="needs" aria-labelledby="needs-h">
+  <div class="section-head">
+    <h2 id="needs-h">Needs you</h2>
+    {% if total %}
+    <p class="progress" role="img" aria-label="{{ board.done_today }} of {{ total }} done today">
+      {% if total <= 10 %}
+      <span class="pips" aria-hidden="true">{% for i in range(total) %}<span class="pip{% if i < board.done_today %} done{% endif %}"></span>{% endfor %}</span>
+      {% endif %}
+      <span aria-hidden="true">{{ board.done_today }} of {{ total }} done today</span>
+    </p>
+    {% endif %}
+  </div>
+
+  {% if n %}
+  <ol class="need-list">
+    {% for need in board.needs[:3] %}{{ need_item(need, loop.first, back) }}{% endfor %}
+  </ol>
+  {% if n > 3 %}
+  <details class="more-needs">
+    <summary>{{ n - 3 }} more {{ 'needs' if n - 3 == 1 else 'need' }} you, after these</summary>
+    <ol class="need-list">
+      {% for need in board.needs[3:] %}{{ need_item(need, false, back) }}{% endfor %}
+    </ol>
+  </details>
+  {% endif %}
+  {% else %}
+  <div class="all-clear">
+    <span class="all-clear-mark" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>
+    <div>
+      <p class="need-say">That's everything for now.</p>
+      <p class="meta">When an owner goes quiet or an ask goes unanswered, it shows up here.</p>
+    </div>
+  </div>
+  {% endif %}
+</section>
+
+<section class="open" aria-labelledby="open-h">
+  <div class="section-head">
+    <h2 id="open-h">Open firedrills</h2>
+    {% if not focus and board.counts.open %}
+    <nav class="filter" aria-label="Filter firedrills">
+      {% for key, label in [('open', 'All'), ('overdue', 'Overdue'), ('due', 'Due this week')] %}
+        {% set c = board.counts[key] %}
+        {% if key == board.active_filter %}<a href="/board{{ '' if key == 'open' else '?filter=' ~ key }}" aria-current="true">{{ label }} {{ c }}</a>
+        {% elif c == 0 %}<span class="off">{{ label }} 0</span>
+        {% else %}<a href="/board{{ '' if key == 'open' else '?filter=' ~ key }}">{{ label }} {{ c }}</a>{% endif %}
+      {% endfor %}
+    </nav>
+    {% endif %}
+  </div>
+
+  {% if focus and board.counts.open %}
+  <div class="tucked">
+    <p>{{ board.counts.open }} open {{ 'firedrill is' if board.counts.open == 1 else 'firedrills are' }} tucked away while you focus.</p>
+    <form method="post" action="/focus">
+      {{ hidden(here) }}
+      <button type="submit" name="focus" value="off">Show them</button>
+    </form>
+  </div>
+  {% elif board.rows %}
+  <p class="visually-hidden">{{ board.result_line }}</p>
+  <ul class="fd-list">
+    {% for row in board.rows %}
+    {% set t = row.tally %}
+    {% set blocked = row.lines|selectattr('kind', 'eq', 'risk')|selectattr('status', 'eq', Status.BLOCKED)|list|length %}
+    {% set at_risk = t.risk - blocked %}
+    {% set parts = [] %}
+    {% if blocked %}{% set _ = parts.append(blocked ~ ' blocked') %}{% endif %}
+    {% if at_risk %}{% set _ = parts.append(at_risk ~ ' at risk') %}{% endif %}
+    {% set quiet = [] %}
+    {% if t.silent %}{% set _ = quiet.append(t.silent ~ ' quiet') %}{% endif %}
+    {% if t.waiting %}{% set _ = quiet.append(t.waiting ~ ' waiting') %}{% endif %}
+    {% if t.fresh %}{% set _ = quiet.append(t.fresh ~ ' not started') %}{% endif %}
+    <li class="fd">
+      <div class="fd-main">
+        <a class="fd-title" href="/f/{{ row.public_id }}">{{ row.title }}</a>
+        <p class="meta">{% if row.source %}{{ row.source }}{% endif %}{% for ref in row.ticket_refs %}{% if row.source or not loop.first %} · {% endif %}<span class="ticket">{{ ref }}</span>{% endfor %}</p>
+      </div>
+      <div class="fd-progress">
+        <div class="bar" role="img" aria-label="{{ t.done }} of {{ row.lines|length }} owners done{% for p in parts + quiet %}, {{ p }}{% endfor %}">
+          {% for k in row.segments %}<span class="seg seg-{{ k }}"></span>{% endfor %}
+        </div>
+        <p class="meta">{{ t.done }} of {{ row.lines|length }} done{% for p in parts %} · <span class="flag">{{ p }}</span>{% endfor %}{% for p in quiet %} · {{ p }}{% endfor %}</p>
+      </div>
+      <div class="fd-due">
+        {% if row.ready_to_close %}<p class="due-main">Ready to close</p>
+        {% elif row.overdue_days %}<p class="due-main overdue">{{ row.overdue_days }} {{ 'day' if row.overdue_days == 1 else 'days' }} overdue</p>
+        {% elif row.due_date %}{% set left = (row.due_date - today()).days %}<p class="due-main">{{ 'Due today' if left == 0 else 'Due tomorrow' if left == 1 else 'In ' ~ left ~ ' days' }}</p>
+        {% else %}<p class="due-main muted">No due date</p>{% endif %}
+        {% if row.due_date %}<p class="meta">{{ row.due_date|day }}</p>{% endif %}
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  <ul class="legend" aria-hidden="true">
+    <li><span class="seg seg-done"></span>Done</li>
+    <li><span class="seg seg-on_track"></span>On track</li>
+    <li><span class="seg seg-waiting"></span>Waiting</li>
+    <li><span class="seg seg-fresh"></span>Not started</li>
+    <li><span class="seg seg-silent"></span>Quiet</li>
+    <li><span class="seg seg-risk"></span>Blocked or at risk</li>
+  </ul>
+  {% else %}
   <div class="empty">
     {% if board.active_filter == 'open' %}
-      {% if can('create_firedrill') %}
-        <p>Nothing is open. <a href="/firedrills/new">Start a firedrill</a>.</p>
-      {% else %}
-        <p>Nothing is open.</p>
-      {% endif %}
-    {% elif board.active_filter == 'stale' %}<p>Nothing is stale.</p>
-    {% elif board.active_filter == 'asked' %}<p>Every ask has an answer.</p>
-    {% elif board.active_filter == 'waiting' %}<p>Nobody is waiting on a date.</p>
+      {% if can('create_firedrill') %}<p>Nothing is open. <a href="/firedrills/new">Start a firedrill</a>.</p>
+      {% else %}<p>Nothing is open.</p>{% endif %}
     {% elif board.active_filter == 'due' %}<p>Nothing is due this week.</p>
     {% else %}<p>Nothing is overdue.</p>
     {% endif %}
   </div>
-{% endfor %}
+  {% endif %}
+</section>
 {% endblock %}

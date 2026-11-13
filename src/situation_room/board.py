@@ -6,7 +6,7 @@ import calendar as stdcal
 import enum
 import uuid
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import distinct_on
@@ -25,7 +25,7 @@ STATUS_LABELS = {
     Status.BLOCKED: "Blocked",
     Status.DONE: "Done",
 }
-FILTERS = ("open", "stale", "asked", "waiting", "due", "overdue")
+FILTERS = ("open", "due", "overdue")
 
 
 @dataclass(frozen=True)
@@ -136,6 +136,22 @@ class OwnerLine:
     ask: OpenAsk | None
     actions: tuple[LineAction, ...]
     primary: LineAction | None
+    ask_age_days: int = 0  # working days since `ask` was emailed (or recorded, if not emailed yet)
+
+    @property
+    def kind(self) -> str:
+        """One word for the board's progress bar: what this owner's line looks like at a glance."""
+        if self.status == Status.DONE:
+            return "done"
+        if self.waiting:
+            return "waiting"
+        if self.status in (Status.BLOCKED, Status.AT_RISK):
+            return "risk"
+        if self.stale:
+            return "silent"
+        if self.status == Status.NEW:
+            return "fresh"
+        return "on_track"
 
     @property
     def sort_key(self) -> int:
@@ -161,7 +177,76 @@ class Row:
     ready_to_close: bool
     created_at: datetime
     lines: list[OwnerLine] = field(default_factory=list)
-    hidden_owners: int = 0
+
+    @property
+    def segments(self) -> list[str]:
+        """One progress-bar segment per owner, done first and trouble last."""
+        return sorted((line.kind for line in self.lines), key=SEGMENT_ORDER.index)
+
+    @property
+    def tally(self) -> dict[str, int]:
+        kinds = [line.kind for line in self.lines]
+        return {k: kinds.count(k) for k in SEGMENT_ORDER}
+
+
+SEGMENT_ORDER = ("done", "on_track", "waiting", "fresh", "silent", "risk")
+
+
+class NeedKind(enum.StrEnum):
+    """Why an owner line is in the viewer's "Needs you" queue."""
+
+    UPDATE = "update"  # the viewer owns the line and it needs their update
+    ASK_AGAIN = "ask_again"  # the viewer's emailed ask has gone unanswered
+    CONFIRM = "confirm"  # the viewer recorded an ask and has not said they emailed it
+    REQUEST = "request"  # the owner has gone quiet and nobody has asked
+    BLOCKED = "blocked"  # the owner is blocked and nobody has asked
+
+
+NEED_ORDER = (NeedKind.UPDATE, NeedKind.ASK_AGAIN, NeedKind.CONFIRM, NeedKind.REQUEST, NeedKind.BLOCKED)
+
+
+def need_of(row: Row, line: OwnerLine) -> NeedKind | None:
+    """Whether this line needs the viewer now, and why. Reads only what `line_view` decided."""
+    if line.status == Status.DONE:
+        return None
+    if LineAction.CONFIRM_SENT in line.actions:
+        return NeedKind.CONFIRM
+    if LineAction.UPDATE in line.actions and (line.stale or line.asked or row.overdue_days):
+        return NeedKind.UPDATE
+    if LineAction.ASK_AGAIN in line.actions and line.ask_state == AskState.SENT:
+        # Give the owner a working day to answer an overdue firedrill, two otherwise.
+        if line.ask_age_days >= (1 if row.overdue_days else 2):
+            return NeedKind.ASK_AGAIN
+        return None
+    if LineAction.REQUEST in line.actions:
+        if line.stale:
+            return NeedKind.REQUEST
+        if line.status == Status.BLOCKED:
+            return NeedKind.BLOCKED
+    return None
+
+
+@dataclass(frozen=True)
+class Need:
+    kind: NeedKind
+    row: Row
+    line: OwnerLine
+
+
+def needs(rows: list[Row]) -> list[Need]:
+    """The viewer's queue: overdue firedrills first, then the quickest kind of action, then the longest quiet."""
+    found = [Need(kind, r, line) for r in rows for line in r.lines if (kind := need_of(r, line))]
+    found.sort(key=lambda n: (0 if n.row.overdue_days else 1, NEED_ORDER.index(n.kind), -n.line.stale_days,
+                              n.row.due_date or date.max))
+    return found
+
+
+@dataclass(frozen=True)
+class WeekDay:
+    day: date
+    is_today: bool
+    is_past: bool
+    due: list[Row]
 
 
 @dataclass
@@ -170,6 +255,10 @@ class Board:
     counts: dict[str, int]
     active_filter: str
     result_line: str
+    needs: list[Need] = field(default_factory=list)
+    done_today: int = 0  # owner lines the viewer acted on today that no longer need them
+    week: list[WeekDay] = field(default_factory=list)
+    summary: str = ""  # one sentence on what is wrong across the board
 
 
 def rollup(statuses: list[Status]) -> Status:
@@ -235,6 +324,10 @@ def _load(s: Session, clock: Clock, stale_after: int, viewer: Person, owner_id: 
                                 waiting_until=a.waiting_until, done=not active, today=today, rules=rules)
         open_asks = asks.get(a.id, []) if active else []
         view = line_view(viewer, a, has_update=u is not None, waiting=state.waiting, asks=open_asks)
+        ask_age = 0
+        if view.ask:
+            asked_at = view.ask.confirmed_sent_at or view.ask.requested_at
+            ask_age = dates.working_days_after(clock.local(asked_at).date(), today)
         rows[a.firedrill_id].lines.append(OwnerLine(
             assignment_id=a.public_id, owner_id=person.id, owner_name=person.display_name, owner_email=person.email,
             assigned_at=a.created_at, status=a.status, last_update_text=u.text if u else None, last_update_at=u.created_at if u else None,
@@ -242,6 +335,7 @@ def _load(s: Session, clock: Clock, stale_after: int, viewer: Person, owner_id: 
             waiting_reason=a.waiting_reason, waiting=state.waiting, stale=state.stale, stale_days=state.stale_days,
             asked=any(k.sent for k in open_asks),
             ask_state=view.ask_state, ask=view.ask, actions=view.actions, primary=view.primary,
+            ask_age_days=ask_age,
         ))
 
     result = []
@@ -264,47 +358,74 @@ def _load(s: Session, clock: Clock, stale_after: int, viewer: Person, owner_id: 
     return result
 
 
-def _line_matches(line: OwnerLine, active_filter: str) -> bool:
-    return {
-        "stale": line.stale,
-        "asked": line.asked,
-        "waiting": line.waiting,
-    }[active_filter]
+def _acted_on_today(s: Session, clock: Clock, viewer: Person) -> set[uuid.UUID]:
+    """Owner lines the viewer emailed an ask about, or posted an update on, today."""
+    start = datetime.combine(clock.today(), datetime.min.time(), clock.tz)
+    asked = select(Assignment.public_id).join(UpdateRequest, UpdateRequest.assignment_id == Assignment.id).where(
+        UpdateRequest.asked_by_id == viewer.id, UpdateRequest.confirmed_sent_at >= start)
+    posted = select(Assignment.public_id).join(Update, Update.assignment_id == Assignment.id).where(
+        Update.author_id == viewer.id, Update.created_at >= start)
+    return set(s.scalars(asked.union(posted)))
+
+
+def _week(rows: list[Row], today: date) -> list[WeekDay]:
+    monday = today - timedelta(days=today.weekday())
+    days = [monday + timedelta(days=n) for n in range(7)]
+    return [WeekDay(day=d, is_today=d == today, is_past=d < today,
+                    due=[r for r in rows if r.due_date == d and not r.ready_to_close]) for d in days]
 
 
 def build(s: Session, clock: Clock, stale_after: int, viewer: Person, active_filter: str = "open") -> Board:
+    today = clock.today()
     rows = _load(s, clock, stale_after, viewer)
     counts = {
         "open": len(rows),
-        "stale": sum(line.stale for r in rows for line in r.lines),
-        "asked": sum(line.asked for r in rows for line in r.lines),
-        "waiting": sum(line.waiting for r in rows for line in r.lines),
         "due": sum(r.due_this_week for r in rows),
         "overdue": sum(r.overdue_days > 0 for r in rows),
     }
     if active_filter not in FILTERS:
         active_filter = "open"
 
-    shown = rows
-    if active_filter in ("stale", "asked", "waiting"):
-        shown = []
-        for r in rows:
-            matching = [line for line in r.lines if _line_matches(line, active_filter)]
-            if matching:
-                r.hidden_owners = len(r.lines) - len(matching)
-                r.lines = matching
-                shown.append(r)
-        noun = {"stale": "stale", "asked": "asked with no reply", "waiting": "waiting"}[active_filter]
-        result_line = f"{counts[active_filter]} {_plural(counts[active_filter], 'owner')} {noun} in {len(shown)} {_plural(len(shown), 'firedrill')}"
-    elif active_filter == "due":
-        shown = [r for r in rows if r.due_this_week]
+    queue = needs(rows)
+    waiting_on_viewer = {n.line.assignment_id for n in queue}
+    done_today = len(_acted_on_today(s, clock, viewer) - waiting_on_viewer)
+
+    # The list reads in time order: overdue first, then by due date.
+    by_due = sorted(rows, key=lambda r: (r.due_date or date.max, r.created_at))
+    if active_filter == "due":
+        shown = [r for r in by_due if r.due_this_week]
         result_line = f"{len(shown)} {_plural(len(shown), 'firedrill')} due this week"
     elif active_filter == "overdue":
-        shown = [r for r in rows if r.overdue_days > 0]
+        shown = [r for r in by_due if r.overdue_days > 0]
         result_line = f"{len(shown)} overdue {_plural(len(shown), 'firedrill')}"
     else:
+        shown = by_due
         result_line = f"{len(rows)} open {_plural(len(rows), 'firedrill')}"
-    return Board(rows=shown, counts=counts, active_filter=active_filter, result_line=result_line)
+    return Board(rows=shown, counts=counts, active_filter=active_filter, result_line=result_line,
+                 needs=queue, done_today=done_today, week=_week(rows, today), summary=_summary(rows))
+
+
+def _summary(rows: list[Row]) -> str:
+    overdue = [r for r in rows if r.overdue_days > 0]
+    quiet = sum(line.stale for r in rows for line in r.lines)
+    parts = []
+    if len(overdue) == 1:
+        d = overdue[0].overdue_days
+        parts.append(f"One firedrill is {d} {_plural(d, 'day')} overdue")
+    elif overdue:
+        parts.append(f"{_count_word(len(overdue))} firedrills are overdue")
+    if quiet:
+        verb = "has" if quiet == 1 else "have"
+        phrase = f"{_count_word(quiet)} {_plural(quiet, 'owner')} {verb} gone quiet"
+        parts.append(phrase if not parts else phrase[0].lower() + phrase[1:])
+    if not parts:
+        return "Nothing is overdue, and every owner has posted recently." if rows else ""
+    return ", and ".join(parts) + "."
+
+
+def _count_word(n: int) -> str:
+    words = ("No", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine")
+    return words[n] if n < len(words) else str(n)
 
 
 def mine(s: Session, clock: Clock, stale_after: int, viewer: Person, person_id: int | None = None) -> list[Row]:

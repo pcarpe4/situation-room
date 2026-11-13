@@ -20,7 +20,7 @@ from starlette.responses import Response
 from starlette.types import Scope
 
 from .. import config as config_mod
-from ..board import STATUS_LABELS, LineAction
+from ..board import STATUS_LABELS, LineAction, NeedKind
 from ..clock import Clock
 from ..config import Config
 from ..db import make_engine, make_sessionmaker
@@ -154,6 +154,7 @@ def _templates(cfg: Config, clock: Clock, css_version: str) -> Jinja2Templates:
     env.globals["status_label"] = lambda s: STATUS_LABELS[Status(s)]
     env.globals["Status"] = Status
     env.globals["LineAction"] = LineAction
+    env.globals["NeedKind"] = NeedKind
     env.globals["today"] = clock.today
     env.globals["css_version"] = css_version
     return templates
