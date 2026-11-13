@@ -59,14 +59,6 @@
 - **Depends on:** Milestone 1, and a named caller.
 - **Revisit when:** A named system needs to read or post firedrill status.
 
-## Version the stylesheet URL
-
-- **What:** Serve `app.css` with a content hash in its URL (for example `/static/app.css?v=<hash>`) set at startup.
-- **Why:** The page links the stylesheet with no version, so a browser can keep the old CSS after a deploy and show new templates with old styles. The /design-review run on 2026-11-12 hit this: fixes did not show until a forced reload.
-- **Effort:** S (human: ~1 hour / CC: ~10 min). Estimated.
-- **Priority:** P2.
-- **Depends on:** Nothing.
-
 ## Tell On track apart from Done at a glance
 
 - **What:** Give the Done badge its own look (neutral or outlined) instead of the same green as On track.
@@ -89,3 +81,14 @@
 - **Why:** Colors are tokens, but spacing uses about 15 one-off rem values and font sizes are ad hoc, so each new screen invents its own. The /design-review run on 2026-11-12 also kept the 4px red edge on stale cards on purpose (the detector flags it as a common AI-generated pattern); a DESIGN.md is where that choice should be written down.
 - **Effort:** S (human: ~1 day / CC: ~30 min with /design-consultation). Estimated.
 - **Priority:** P3.
+
+## Completed
+
+### Version the stylesheet URL
+
+- **What:** Serve `app.css` with a content hash in its URL (for example `/static/app.css?v=<hash>`) set at startup.
+- **Why:** The page links the stylesheet with no version, so a browser can keep the old CSS after a deploy and show new templates with old styles. The /design-review run on 2026-11-12 hit this: fixes did not show until a forced reload.
+- **Effort:** S (human: ~1 hour / CC: ~10 min). Estimated.
+- **Priority:** P2.
+- **Depends on:** Nothing.
+- **Completed:** unversioned (2026-11-12), on design-review-fixes: `app.css` is linked as `/static/app.css?v=<content hash>`. Open review note: `/static` still sends no Cache-Control, so a rolling multi-replica deploy can briefly pair a new hash with old CSS.
