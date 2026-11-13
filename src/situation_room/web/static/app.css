@@ -164,7 +164,7 @@ input, textarea, select {
   background: var(--surface); color: var(--text); width: 100%;
 }
 input[type="checkbox"], input[type="radio"] { width: auto; min-width: 20px; min-height: 20px; }
-fieldset { border: 1px solid var(--line); border-radius: var(--radius); padding: 0.6rem 0.9rem; }
+fieldset { margin: 0; min-inline-size: 0; border: 1px solid var(--line); border-radius: var(--radius); padding: 0.6rem 0.9rem; }
 legend { font-weight: 600; padding: 0 0.3rem; }
 .statuses .status-choice { min-height: 44px; }
 
