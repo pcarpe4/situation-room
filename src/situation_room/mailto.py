@@ -52,6 +52,15 @@ def ask_mailto(
     return _build(to_email, subject, short_body)
 
 
+def password_link_mailto(*, to_email: str, to_name: str, link: str, sender_name: str, days: int) -> str:
+    body = (
+        f"Hello {_one_line(to_name)},\n\n"
+        f"Use this link to choose your Situation Room password:\n\n{link}\n\n"
+        f"It works once and stops working after {days} days.\n\n{_one_line(sender_name)}"
+    )
+    return _build(to_email, "Your Situation Room password link", body)
+
+
 def _build(to_email: str, subject: str, body: str) -> str:
     return (
         "mailto:" + quote(to_email, safe="@")

@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}{{ person.display_name }} · Roster · Situation Room{% endblock %}
+{% block content %}
+<div class="narrow">
+<p class="crumb"><a href="/roster">Roster</a></p>
+<h1>{{ person.display_name }}</h1>
+<p class="meta">{{ 'Active' if person.active else 'Inactive' }} · joined {{ person.created_at|exact }}{% if person.id == me.id %} · this is you{% endif %}</p>
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+
+{% if link %}
+<section class="notice link-box" aria-labelledby="link-h">
+  <h2 id="link-h">Password link for {{ person.display_name }}</h2>
+  <p>Send them this link. It works once and stops working after {{ link_days }} days. It is shown only now.</p>
+  <p><input readonly value="{{ link }}" aria-label="Password link"></p>
+  <p><a class="button" href="{{ link_mail }}">Email it to them</a></p>
+</section>
+{% endif %}
+
+<h2>Details</h2>
+<form method="post" action="/roster/{{ person.id }}" class="stack">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label>Name <input name="display_name" required maxlength="200" value="{{ form.display_name or person.display_name }}"></label>
+  <label>Mailbox address <input type="email" name="email" required maxlength="320" value="{{ form.email or person.email }}"></label>
+  <label>Role <span class="req">Manager: owns and updates assignments. Lead: also creates firedrills and asks for updates. Triage: also manages this roster.</span>
+    <select name="role">
+      {% for r in roles %}<option value="{{ r.value }}" {% if (form.role or person.role.value) == r.value %}selected{% endif %}>{{ r.value|capitalize }}</option>{% endfor %}
+    </select>
+  </label>
+  <button class="primary" type="submit">Save</button>
+</form>
+
+{% if cfg.has_profiles %}
+<h2>Password</h2>
+<p class="context">{% if person.password_hash %}They have a password. A link lets them choose a new one if they forgot it; the old one keeps working until they do.{% else %}No password yet, so they cannot sign in. Make a link and send it to them.{% endif %}</p>
+<form method="post" action="/roster/{{ person.id }}/password-link">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <button type="submit"{% if not person.active %} disabled{% endif %}>Make a password link</button>
+</form>
+{% endif %}
+
+<h2>Access</h2>
+{% if person.active %}
+<p class="context">Deactivating signs them out and keeps their history. It is refused while they own active assignments.</p>
+<form method="post" action="/roster/{{ person.id }}/deactivate">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <button type="submit">Deactivate</button>
+</form>
+{% else %}
+<p class="context">They cannot sign in. Reactivating gives their access back as it was.</p>
+<form method="post" action="/roster/{{ person.id }}/reactivate">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <button type="submit">Reactivate</button>
+</form>
+{% endif %}
+{% if person.id != me.id %}
+<p class="context">Removing deletes the profile for good. Only for a sign-up with no history on the board, such as a mistake.</p>
+<form method="post" action="/roster/{{ person.id }}/remove">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <button class="quiet danger" type="submit">Remove profile</button>
+</form>
+{% endif %}
+</div>
+{% endblock %}

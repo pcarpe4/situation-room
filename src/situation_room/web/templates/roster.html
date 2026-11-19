@@ -2,34 +2,35 @@
 {% block title %}Roster · Situation Room{% endblock %}
 {% block content %}
 <h1>Roster</h1>
+<p class="context">Everyone who can use the board.{% if cfg.has_profiles %} People add themselves by creating a profile and start as a Manager; change a role, reset a password or switch someone off from Manage.{% endif %}</p>
 {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
 <table class="roster">
-  <thead><tr><th>Name</th><th>Role</th><th>Email</th><th>Sign-in value</th><th>Status</th><th></th></tr></thead>
+  <thead><tr><th>Name</th><th>Role</th><th>Email</th>
+    <th>{{ 'Password' if cfg.has_profiles else 'Sign-in value' }}</th><th>Status</th><th><span class="visually-hidden">Manage</span></th></tr></thead>
   <tbody>
   {% for p in people %}
     <tr{% if not p.active %} class="inactive"{% endif %}>
-      <td>{{ p.display_name }}</td>
+      <td>{{ p.display_name }}{% if p.id == me.id %} <span class="meta">(you)</span>{% endif %}</td>
       <td>{{ p.role.value|capitalize }}</td>
       <td>{{ p.email }}</td>
-      <td>{{ p.login_id }}</td>
+      <td>{% if cfg.has_profiles %}{{ 'Set' if p.password_hash else 'Not set yet' }}{% else %}{{ p.login_id }}{% endif %}</td>
       <td>{{ 'Active' if p.active else 'Inactive' }}</td>
-      <td>{% if p.active and p.id != me.id %}
-        <form method="post" action="/roster/{{ p.id }}/deactivate">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <button class="quiet" type="submit">Deactivate</button>
-        </form>{% endif %}</td>
+      <td><a href="/roster/{{ p.id }}" aria-label="Manage {{ p.display_name }}">Manage</a></td>
     </tr>
   {% endfor %}
   </tbody>
 </table>
 
 <h2>Add a person</h2>
+{% if cfg.has_profiles %}<p class="context narrow">Only needed to set someone up before they arrive. You get a link to send them, and they choose their own password.</p>{% endif %}
 <form method="post" action="/roster" class="stack narrow">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <label>Name <input name="display_name" required maxlength="200" value="{{ form.display_name or '' }}"></label>
   <label>Mailbox address <input type="email" name="email" required maxlength="320" value="{{ form.email or '' }}"></label>
+  {% if not cfg.has_profiles %}
   <label>Sign-in value <span class="req">what sign-in presents for them</span>
     <input name="login_id" required maxlength="320" value="{{ form.login_id or '' }}"></label>
+  {% endif %}
   <label>Role
     <select name="role">
       {% for r in roles %}<option value="{{ r.value }}" {% if (form.role or 'manager') == r.value %}selected{% endif %}>{{ r.value|capitalize }}</option>{% endfor %}

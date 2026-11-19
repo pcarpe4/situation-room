@@ -1,8 +1,8 @@
 """The `sr` command.
 
-    uv run sr dev              local Postgres, migrations, sample data, app on :8000
-    uv run sr migrate          apply migrations (and seed the first Triage person if configured)
-    uv run sr seed             load sample data (refused in production)
+    uv run sr dev              local Postgres, migrations, app on :8000
+    uv run sr migrate          apply migrations (and add the first Triage person if configured)
+    uv run sr password-link EMAIL   print a one-time link that person uses to choose a password
     uv run sr serve            run the app from SR_* configuration
     uv run sr check-config     check SR_* configuration and name the first problem
     uv run sr db start|stop|url
@@ -85,8 +85,10 @@ def migrate(url: str) -> None:
     login = os.environ.get("SR_FIRST_TRIAGE_LOGIN", "").strip()
     email = os.environ.get("SR_FIRST_TRIAGE_EMAIL", "").strip()
     if login or email:
-        if not (login and email):
-            fail("CONFIG_MISSING", "SR_FIRST_TRIAGE_LOGIN and SR_FIRST_TRIAGE_EMAIL must be set together")
+        if not email:
+            fail("CONFIG_MISSING", "SR_FIRST_TRIAGE_EMAIL must be set when SR_FIRST_TRIAGE_LOGIN is")
+        # A local profile signs in with its email, so the sign-in value defaults to it.
+        login = login or email
         from . import domain
         tz = _timezone()
         engine = create_engine(url, hide_parameters=True)
@@ -111,16 +113,27 @@ def _timezone():
         fail("CONFIG_INVALID", "SR_TIMEZONE is not a known time zone name")
 
 
-def seed(url: str) -> None:
-    if os.environ.get("SR_ENVIRONMENT") == "production":
-        fail("SEED_REFUSED", "sample data is never loaded in production")
-    from . import seed as seed_mod
+def password_link(url: str, email: str) -> None:
+    """The way back in when nobody can make a link from the roster, such as a locked-out Triage person."""
+    try:
+        cfg = config_mod.load()
+    except config_mod.ConfigError as exc:
+        fail(exc.code, f"{exc.key} {exc.problem}", exit_code=2)
+    if not cfg.has_profiles:
+        fail("SIGNIN_MODE", "password links are only for local profiles (SR_AUTH_MODE=local)")
+    from sqlalchemy import select
+
+    from . import passwords
+    from .models import Person
     engine = create_engine(url, hide_parameters=True)
     with make_sessionmaker(engine)() as s:
-        loaded = seed_mod.seed(s, Clock(_timezone()))
-        s.commit()
+        person = s.scalar(select(Person).where(Person.email == email.strip().lower()))
+        if person is None or not person.active:
+            fail("NOT_FOUND", "no active person on the roster has that email")
+        token = passwords.link_token(cfg.secret_key, person.id, person.password_hash)
     engine.dispose()
-    print("sr: sample data loaded" if loaded else "sr: firedrills already exist, sample data skipped")
+    print(f"{cfg.public_url}/password/{token}")
+    print(f"sr: works once, for {passwords.LINK_MAX_AGE // 86400} days", file=sys.stderr)
 
 
 def _local_timezone() -> str:
@@ -133,16 +146,14 @@ def _local_timezone() -> str:
     return "UTC"
 
 
-def dev(port: int, load_sample: bool) -> None:
-    os.environ.setdefault("SR_AUTH_MODE", "dev")
+def dev(port: int) -> None:
+    os.environ.setdefault("SR_AUTH_MODE", "local")
     os.environ.setdefault("SR_ENVIRONMENT", "development")
     os.environ.setdefault("SR_PUBLIC_URL", f"http://localhost:{port}")
     os.environ.setdefault("SR_TIMEZONE", _local_timezone())
     os.environ.setdefault("SR_SECRET_KEY", secrets.token_urlsafe(48))
     url = _database_url()
     migrate(url)
-    if load_sample:
-        seed(url)
     check_config()
     import uvicorn
     print(f"sr: open {os.environ['SR_PUBLIC_URL']}")
@@ -169,11 +180,11 @@ def check_config() -> None:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="sr", description="Situation Room")
     sub = parser.add_subparsers(dest="cmd", required=True)
-    p_dev = sub.add_parser("dev", help="run locally with an embedded Postgres and sample data")
+    p_dev = sub.add_parser("dev", help="run locally with an embedded Postgres")
     p_dev.add_argument("--port", type=int, default=8000)
-    p_dev.add_argument("--no-seed", action="store_true", help="skip the sample data")
     sub.add_parser("migrate", help="apply database migrations")
-    sub.add_parser("seed", help="load sample data (not in production)")
+    p_link = sub.add_parser("password-link", help="print a one-time link a person uses to choose a password")
+    p_link.add_argument("email")
     p_serve = sub.add_parser("serve", help="run the app from SR_* configuration")
     p_serve.add_argument("--host", default="127.0.0.1")
     p_serve.add_argument("--port", type=int, default=8000)
@@ -185,11 +196,11 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     if args.cmd == "dev":
-        dev(args.port, not args.no_seed)
+        dev(args.port)
     elif args.cmd == "migrate":
         migrate(_database_url())
-    elif args.cmd == "seed":
-        seed(_database_url())
+    elif args.cmd == "password-link":
+        password_link(_database_url(), args.email)
     elif args.cmd == "serve":
         serve(args.host, args.port)
     elif args.cmd == "check-config":

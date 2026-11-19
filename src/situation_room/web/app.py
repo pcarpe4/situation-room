@@ -28,7 +28,7 @@ from ..domain import DomainError
 from ..models import Status
 from . import routes
 from .render import render
-from .security import Refused, SignInRequired, csrf_protect
+from .security import KNOWN_COOKIE, Refused, SignInRequired, SignInThrottle, csrf_protect
 
 HERE = Path(__file__).parent
 SESSION_MAX_AGE = 12 * 60 * 60
@@ -49,6 +49,7 @@ def create_app(cfg: Config, *, clock: Clock | None = None, engine: Engine | None
     app.state.clock = clock
     app.state.engine = engine
     app.state.sessionmaker = make_sessionmaker(engine)
+    app.state.signin_throttle = SignInThrottle()
     css_version = _css_version()
     app.state.templates = _templates(cfg, clock, css_version)
 
@@ -69,7 +70,10 @@ def create_app(cfg: Config, *, clock: Clock | None = None, engine: Engine | None
 
     @app.exception_handler(SignInRequired)
     async def _signin(request: Request, exc: SignInRequired):
-        return RedirectResponse(f"/signin?next={quote(exc.next_path, safe='/')}", status_code=303)
+        # A browser that has never signed in is new here: offer it a profile, not a password box.
+        first_visit = cfg.auth_mode == "local" and KNOWN_COOKIE not in request.cookies
+        page = "/welcome" if first_visit else "/signin"
+        return RedirectResponse(f"{page}?next={quote(exc.next_path, safe='/')}", status_code=303)
 
     @app.exception_handler(Refused)
     async def _refused(request: Request, exc: Refused):

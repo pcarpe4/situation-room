@@ -13,9 +13,9 @@ from datetime import datetime
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-AUTH_MODES = ("oidc", "proxy", "dev")
+AUTH_MODES = ("oidc", "proxy", "local", "dev")
 ENVIRONMENTS = ("development", "production")
-BUILT_AUTH_MODES = ("dev",)
+BUILT_AUTH_MODES = ("local", "dev")
 
 
 class ConfigError(Exception):
@@ -45,6 +45,12 @@ class Config:
     @property
     def is_dev_signin(self) -> bool:
         return self.auth_mode == "dev"
+
+    @property
+    def has_profiles(self) -> bool:
+        """People make their own profile and sign in with an email and password.
+        The stand-in until a directory (OIDC or a sign-in proxy) is connected."""
+        return self.auth_mode in ("local", "dev")
 
     @property
     def public_origin(self) -> str:
@@ -106,7 +112,7 @@ def load(env: Mapping[str, str] | None = None) -> Config:
     if auth_mode not in BUILT_AUTH_MODES:
         raise ConfigError(
             "CONFIG_UNSUPPORTED", "SR_AUTH_MODE",
-            f"is {auth_mode}, which is not built yet; this version runs with dev sign-in only",
+            f"is {auth_mode}, which is not built yet; this version runs with local or dev sign-in",
         )
 
     public_url = get("SR_PUBLIC_URL").rstrip("/")
