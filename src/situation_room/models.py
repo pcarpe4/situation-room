@@ -76,6 +76,8 @@ class Person(Base):
     login_id: Mapped[str] = mapped_column(String(320), unique=True)
     role: Mapped[Role] = mapped_column(_enum(Role, "role"))
     active: Mapped[bool] = mapped_column(default=True)
+    # Set when the person signs in with a local profile. None until they pick a password.
+    password_hash: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (

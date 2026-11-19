@@ -12,11 +12,11 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from .. import board as board_mod
-from .. import domain, mailto
+from .. import domain, mailto, passwords
 from ..models import Assignment, Firedrill, FiredrillState, Person, Role, Status, Update, UpdateRequest
 from ..policy import Action, can
 from .render import FOCUS_COOKIE, THEME_COOKIE, THEMES, render
-from .security import Refused, current_person, get_db, safe_next
+from .security import KNOWN_COOKIE, Refused, current_person, get_db, safe_next, start_session
 
 router = APIRouter()
 
@@ -51,12 +51,53 @@ def healthz_db(db: Session = Depends(get_db)) -> str:
     return "ok"
 
 
-# Sign-in --------------------------------------------------------------------------
+# Sign-in and profiles ---------------------------------------------------------------
+
+YEAR = 400 * 24 * 3600
+
+
+def _signed_in(request: Request, person: Person, next_path: str) -> RedirectResponse:
+    start_session(request, person)
+    response = _see_other(safe_next(next_path))
+    response.set_cookie(KNOWN_COOKIE, "1", max_age=YEAR, httponly=True, samesite="lax",
+                        secure=_cfg(request).public_url.startswith("https://"))
+    return response
+
+
+def _require_profiles(request: Request) -> None:
+    if not _cfg(request).has_profiles:
+        raise Refused("SIGNIN_MODE", "Profiles are switched off here. Sign in through your organisation.", 404)
+
+
+def _signin_page(request: Request, db: Session, next_path: str, *, status_code: int = 200,
+                 email: str = "", error: str | None = None):
+    people = []
+    if _cfg(request).is_dev_signin:
+        people = db.scalars(select(Person).where(Person.active.is_(True)).order_by(Person.role, Person.display_name)).all()
+    return render(request, "signin.html", status_code=status_code, people=people, next=safe_next(next_path),
+                  email=email, error=error)
+
 
 @router.get("/signin")
 def signin_page(request: Request, next: str = "/", db: Session = Depends(get_db)):
-    people = db.scalars(select(Person).where(Person.active.is_(True)).order_by(Person.role, Person.display_name)).all()
-    return render(request, "signin.html", people=people, next=safe_next(next))
+    return _signin_page(request, db, next)
+
+
+@router.post("/signin")
+def signin(request: Request, email: str = Form(""), password: str = Form(""), next: str = Form("/"),
+           db: Session = Depends(get_db)):
+    _require_profiles(request)
+    throttle = request.app.state.signin_throttle
+    if throttle.blocked(email):
+        return _signin_page(request, db, next, status_code=429, email=email,
+                            error="Too many tries for that email. Wait ten minutes, or ask your Triage person for a password link.")
+    person = domain.authenticate(db, email, password)
+    if person is None:
+        throttle.failed(email)
+        return _signin_page(request, db, next, status_code=401, email=email,
+                            error="That email and password do not match a profile.")
+    throttle.succeeded(email)
+    return _signed_in(request, person, next)
 
 
 @router.post("/signin/dev")
@@ -66,9 +107,73 @@ def signin_dev(request: Request, person_id: int = Form(...), next: str = Form("/
     person = db.get(Person, person_id)
     if person is None or not person.active:
         raise Refused("NO_ACCESS", "That person is not on the active roster.")
-    request.session.clear()
-    request.session["person_id"] = person.id
-    return _see_other(safe_next(next))
+    return _signed_in(request, person, next)
+
+
+def _welcome_page(request: Request, db: Session, next_path: str, *, status_code: int = 200,
+                  form: dict | None = None, error: str | None = None):
+    return render(request, "welcome.html", status_code=status_code, next=safe_next(next_path), form=form or {},
+                  error=error, first=not domain.has_admin(db), min_length=passwords.MIN_LENGTH)
+
+
+@router.get("/welcome")
+def welcome_page(request: Request, next: str = "/", db: Session = Depends(get_db)):
+    _require_profiles(request)
+    return _welcome_page(request, db, next)
+
+
+@router.post("/welcome")
+def welcome(request: Request, display_name: str = Form(""), email: str = Form(""), password: str = Form(""),
+            password_again: str = Form(""), next: str = Form("/"), db: Session = Depends(get_db)):
+    _require_profiles(request)
+    values = {"display_name": display_name, "email": email}
+    if password != password_again:
+        return _welcome_page(request, db, next, status_code=400, form=values, error="The two passwords do not match.")
+    try:
+        person = domain.register_profile(db, _clock(request), display_name=display_name, email=email, password=password)
+    except domain.DomainError as exc:
+        db.rollback()
+        return _welcome_page(request, db, next, status_code=exc.http_status, form=values, error=exc.message)
+    db.commit()
+    return _signed_in(request, person, next)
+
+
+def _person_for_link(request: Request, db: Session, token: str) -> Person:
+    """The person a password link was made for, while the link is still good."""
+    _require_profiles(request)
+    found = passwords.read_link_token(_cfg(request).secret_key, token)
+    person = db.get(Person, found[0]) if found else None
+    if person is None or not person.active or passwords.fingerprint(person.password_hash) != found[1]:
+        raise Refused("LINK_SPENT", "This password link has been used or is too old. Ask your Triage person for a new one.", 410)
+    return person
+
+
+@router.get("/password/{token}")
+def password_page(request: Request, token: str, db: Session = Depends(get_db)):
+    person = _person_for_link(request, db, token)
+    return render(request, "password.html", person=person, token=token, error=None, min_length=passwords.MIN_LENGTH)
+
+
+@router.post("/password/{token}")
+def password_set(request: Request, token: str, password: str = Form(""), password_again: str = Form(""),
+                 db: Session = Depends(get_db)):
+    person = _person_for_link(request, db, token)
+    error = None
+    if password != password_again:
+        error = "The two passwords do not match."
+    else:
+        try:
+            person = domain.set_password(db, _clock(request), person.id, password)
+        except domain.DomainError as exc:
+            if exc.http_status != 400:
+                raise
+            db.rollback()
+            error = exc.message
+    if error:
+        return render(request, "password.html", status_code=400, person=person, token=token, error=error,
+                      min_length=passwords.MIN_LENGTH)
+    db.commit()
+    return _signed_in(request, person, "/")
 
 
 @router.post("/signout")
@@ -326,14 +431,33 @@ def ask_cancel(request: Request, ask_id: int, back: str = Form("/board"),
 
 # Roster -----------------------------------------------------------------------------
 
+def _roster(db: Session) -> list[Person]:
+    return list(db.scalars(select(Person).order_by(Person.active.desc(), Person.display_name)))
+
+
+def _roster_page(request: Request, db: Session, *, status_code: int = 200, form: dict | None = None,
+                 error: str | None = None):
+    return render(request, "roster.html", status_code=status_code, people=_roster(db), roles=list(Role),
+                  form=form or {}, error=error, tab="roster")
+
+
+def _person_page(request: Request, db: Session, me: Person, person_id: int, *, status_code: int = 200,
+                 form: dict | None = None, error: str | None = None, link: str | None = None):
+    person = db.get(Person, person_id)
+    if person is None:
+        raise Refused("NOT_FOUND", "No such person.", 404)
+    link_mail = link and mailto.password_link_mailto(
+        to_email=person.email, to_name=person.display_name, link=link, sender_name=me.display_name,
+        days=passwords.LINK_MAX_AGE // 86400)
+    return render(request, "person.html", status_code=status_code, person=person, roles=list(Role),
+                  form=form or {}, error=error, link=link, link_mail=link_mail,
+                  link_days=passwords.LINK_MAX_AGE // 86400, tab="roster")
+
+
 @router.get("/roster")
 def roster_page(request: Request, me: Person = Depends(current_person), db: Session = Depends(get_db)):
     _require(me, Action.MANAGE_ROSTER)
-    return render(request, "roster.html", people=_roster(db), roles=list(Role), form={}, error=None, tab="roster")
-
-
-def _roster(db: Session) -> list[Person]:
-    return list(db.scalars(select(Person).order_by(Person.active.desc(), Person.display_name)))
+    return _roster_page(request, db)
 
 
 @router.post("/roster")
@@ -342,25 +466,78 @@ def roster_add(request: Request, display_name: str = Form(""), email: str = Form
     _require(me, Action.MANAGE_ROSTER)
     values = {"display_name": display_name, "email": email, "login_id": login_id, "role": role}
     try:
-        domain.add_person(db, _clock(request), me, display_name=display_name, email=email,
-                          login_id=login_id, role=Role(role) if role in {r.value for r in Role} else Role.MANAGER)
+        person = domain.add_person(db, _clock(request), me, display_name=display_name, email=email,
+                                   login_id=login_id, role=Role(role) if role in {r.value for r in Role} else Role.MANAGER)
     except domain.DomainError as exc:
         db.rollback()
-        return render(request, "roster.html", status_code=exc.http_status, people=_roster(db), roles=list(Role),
-                      form=values, error=exc.message, tab="roster")
+        return _roster_page(request, db, status_code=exc.http_status, form=values, error=exc.message)
     db.commit()
-    return _see_other("/roster")
+    # With profiles, the next step is on their page: a password link to send them.
+    return _see_other(f"/roster/{person.id}" if _cfg(request).has_profiles else "/roster")
+
+
+@router.get("/roster/{person_id}")
+def person_page(request: Request, person_id: int, me: Person = Depends(current_person), db: Session = Depends(get_db)):
+    _require(me, Action.MANAGE_ROSTER)
+    return _person_page(request, db, me, person_id)
+
+
+@router.post("/roster/{person_id}")
+def person_save(request: Request, person_id: int, display_name: str = Form(""), email: str = Form(""),
+                role: str = Form(""), me: Person = Depends(current_person), db: Session = Depends(get_db)):
+    values = {"display_name": display_name, "email": email, "role": role}
+    return _person_change(
+        request, db, me, person_id, values,
+        lambda: domain.update_person(db, _clock(request), me, person_id, display_name=display_name, email=email, role=role),
+    )
 
 
 @router.post("/roster/{person_id}/deactivate")
 def roster_deactivate(request: Request, person_id: int, me: Person = Depends(current_person), db: Session = Depends(get_db)):
+    return _person_change(request, db, me, person_id, {},
+                          lambda: domain.deactivate_person(db, _clock(request), me, person_id))
+
+
+@router.post("/roster/{person_id}/reactivate")
+def roster_reactivate(request: Request, person_id: int, me: Person = Depends(current_person), db: Session = Depends(get_db)):
+    return _person_change(request, db, me, person_id, {},
+                          lambda: domain.reactivate_person(db, _clock(request), me, person_id))
+
+
+@router.post("/roster/{person_id}/remove")
+def roster_remove(request: Request, person_id: int, me: Person = Depends(current_person), db: Session = Depends(get_db)):
+    return _person_change(request, db, me, person_id, {},
+                          lambda: domain.remove_person(db, _clock(request), me, person_id), then="/roster")
+
+
+def _person_change(request: Request, db: Session, me: Person, person_id: int, values: dict, change, then: str | None = None):
+    """Run one roster change. A refusal that is about the data comes back on the person's page."""
     try:
-        domain.deactivate_person(db, _clock(request), me, person_id)
+        change()
     except domain.DomainError as exc:
-        if exc.http_status == 403:
+        # Re-raise before any rollback: a rollback expires `me`, which the error page still reads.
+        if exc.http_status in (403, 404):
             raise
         db.rollback()
-        return render(request, "roster.html", status_code=exc.http_status, people=_roster(db), roles=list(Role),
-                      form={}, error=exc.message, tab="roster")
+        return _person_page(request, db, me, person_id, status_code=exc.http_status, form=values, error=exc.message)
     db.commit()
-    return _see_other("/roster")
+    return _see_other(then or f"/roster/{person_id}")
+
+
+@router.post("/roster/{person_id}/password-link")
+def roster_password_link(request: Request, person_id: int, me: Person = Depends(current_person),
+                         db: Session = Depends(get_db)):
+    """Make a one-time link the person uses to choose a password. Triage passes it on."""
+    _require(me, Action.MANAGE_ROSTER)
+    _require_profiles(request)
+    person = db.get(Person, person_id)
+    if person is None:
+        raise Refused("NOT_FOUND", "No such person.", 404)
+    if not person.active:
+        return _person_page(request, db, me, person_id, status_code=409,
+                            error=f"{person.display_name} is inactive. Reactivate them first.")
+    cfg = _cfg(request)
+    link = f"{cfg.public_url}/password/{passwords.link_token(cfg.secret_key, person.id, person.password_hash)}"
+    domain.record_password_link(db, _clock(request), me, person)
+    db.commit()
+    return _person_page(request, db, me, person_id, link=link)

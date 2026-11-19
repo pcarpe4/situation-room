@@ -3,8 +3,21 @@
 {% block content %}
 <div class="narrow">
 <h1>Sign in</h1>
-{% if cfg.is_dev_signin %}
-  <p class="meta">Development sign-in: pick who to be.</p>
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+{% if cfg.has_profiles %}
+<form method="post" action="/signin" class="stack">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="next" value="{{ next }}">
+  <label>Email <input type="email" name="email" required maxlength="320" autocomplete="username" value="{{ email }}"></label>
+  <label>Password <input type="password" name="password" required maxlength="200" autocomplete="current-password"></label>
+  <button class="primary" type="submit">Sign in</button>
+</form>
+<p class="meta">First time here? <a href="/welcome?next={{ next|urlencode }}">Create your profile</a>.
+  Forgot your password? Ask your Triage person for a password link.</p>
+{% endif %}
+{% if cfg.is_dev_signin and people %}
+  <h2>Development sign-in</h2>
+  <p class="meta">Pick who to be. No password needed in this mode.</p>
   {% for p in people %}
   <form method="post" action="/signin/dev" class="pick">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -12,8 +25,6 @@
     <input type="hidden" name="next" value="{{ next }}">
     <button type="submit">{{ p.display_name }} <span class="meta">{{ p.role.value|capitalize }}</span></button>
   </form>
-  {% else %}
-  <p class="notice">The roster is empty. Run <code>uv run sr seed</code> for sample people.</p>
   {% endfor %}
 {% endif %}
 </div>

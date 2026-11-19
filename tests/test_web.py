@@ -1,6 +1,7 @@
 import hashlib
 import re
-from datetime import datetime
+import uuid
+from datetime import datetime, timedelta
 from urllib.parse import unquote
 
 import pytest
@@ -10,8 +11,10 @@ from sqlalchemy.engine import create_engine
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
-from situation_room import domain, mailto, seed
-from situation_room.models import Assignment, Firedrill, Update
+from situation_room import domain, mailto
+from situation_room.clock import FixedClock
+from situation_room.dates import subtract_working_days
+from situation_room.models import Assignment, Firedrill, Status, Update
 from situation_room.web import routes
 from situation_room.web.app import create_app
 
@@ -131,9 +134,46 @@ def test_roster_is_triage_only(client, people):
     assert client.get("/roster").status_code == 403
 
 
-def test_the_seeded_board_renders_for_every_role(db, clock, client, people):
-    assert seed.seed(db, clock)
+def busy_board(db, clock, people):
+    """One firedrill in every state worth looking at: several owners, done, blocked, stale and asked,
+    overdue, waiting, and brand new."""
+    today = clock.today()
+
+    def at(working_days_ago: int, hour: int = 10) -> FixedClock:
+        day = subtract_working_days(today, working_days_ago)
+        return FixedClock(clock.tz, datetime(day.year, day.month, day.day, hour, tzinfo=clock.tz))
+
+    def create(when, title, due, owners):
+        f = domain.create_firedrill(db, when, people.lead, title=title, short_description="Sample.", due_date=due,
+                                    requested_by="Security office", source="Security office",
+                                    ticket_text="CHG0034567", owner_ids=[o.id for o in owners])
+        db.refresh(f)
+        return {a.owner_id: a.public_id for a in f.assignments}
+
+    def token() -> str:
+        return uuid.uuid4().hex
+
+    shared = create(at(8), "Functional tests", today + timedelta(days=20), [people.ann, people.bob, people.lead])
+    domain.post_update(db, at(3), people.lead, shared[people.lead.id], status=Status.DONE, text="All done.", form_token=token())
+    domain.post_update(db, at(2), people.bob, shared[people.bob.id], status=Status.BLOCKED, text="Waiting on accounts.", form_token=token())
+    domain.post_update(db, at(1, 15), people.ann, shared[people.ann.id], status=Status.ON_TRACK, text="Three of five.", form_token=token())
+
+    overdue = create(at(10), "Rotate service account passwords", today - timedelta(days=2), [people.bob])
+    domain.post_update(db, at(6), people.bob, overdue[people.bob.id], status=Status.AT_RISK, text="Two left.", form_token=token())
+    ask = domain.request_update(db, at(1, 9), people.lead, overdue[people.bob.id])
+    domain.confirm_ask_sent(db, at(1, 9), people.lead, ask.id)
+
+    waiting = create(at(4), "Vendor patch", today + timedelta(days=12), [people.ann])
+    domain.post_update(db, at(3), people.ann, waiting[people.ann.id], status=Status.ON_TRACK, text="Approved.", form_token=token())
+    domain.set_wait(db, at(1), people.ann, waiting[people.ann.id], until=today + timedelta(days=5),
+                    reason="The vendor ships next week.", form_token=token())
+
+    create(at(0, 9), "Onboard tests", today + timedelta(days=1), [people.ann])
     db.commit()
+
+
+def test_a_busy_board_renders_for_every_role(db, clock, client, people):
+    busy_board(db, clock, people)
     for person in (people.lead, people.ann, people.triage):
         client.cookies.clear()
         sign_in(client, person)
@@ -141,6 +181,12 @@ def test_the_seeded_board_renders_for_every_role(db, clock, client, people):
             assert client.get(path).status_code == 200, (person.display_name, path)
     f = db.scalar(select(Firedrill).limit(1))
     assert client.get(f"/f/{f.public_id}").status_code == 200
+
+
+def test_a_new_install_has_no_people_and_no_firedrills(db):
+    from situation_room.models import Person
+    assert db.scalar(select(func.count()).select_from(Person)) == 0
+    assert db.scalar(select(func.count()).select_from(Firedrill)) == 0
 
 
 def test_the_mailto_stays_under_budget_with_a_long_title():

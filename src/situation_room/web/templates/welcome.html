@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Create your profile · Situation Room{% endblock %}
+{% block content %}
+<div class="narrow">
+<h1>Create your profile</h1>
+{% if first %}
+<p class="notice">You are the first one here, so this profile will be the admin (the Triage role). It can manage everyone else's.</p>
+{% else %}
+<p class="context">Welcome. Tell the board who you are so firedrills can be assigned to you. It takes a minute, once.</p>
+{% endif %}
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+<form method="post" action="/welcome" class="stack">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="next" value="{{ next }}">
+  <label>Your name <input name="display_name" required maxlength="200" autocomplete="name" value="{{ form.display_name or '' }}"></label>
+  <label>Work email <span class="req">where requests for updates are sent</span>
+    <input type="email" name="email" required maxlength="320" autocomplete="username" value="{{ form.email or '' }}"></label>
+  <label>Password <span class="req">at least {{ min_length }} characters</span>
+    <input type="password" name="password" required minlength="{{ min_length }}" maxlength="200" autocomplete="new-password"></label>
+  <label>Password again
+    <input type="password" name="password_again" required minlength="{{ min_length }}" maxlength="200" autocomplete="new-password"></label>
+  <button class="primary" type="submit">Create profile</button>
+</form>
+<p class="meta">Already have a profile? <a href="/signin?next={{ next|urlencode }}">Sign in</a>.</p>
+</div>
+{% endblock %}

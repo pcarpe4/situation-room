@@ -15,11 +15,12 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
+from sqlalchemy import text as sql_text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from . import tickets
+from . import passwords, tickets
 from .clock import Clock
 from .models import (
     Assignment,
@@ -39,6 +40,9 @@ TITLE_MAX = 200
 DESCRIPTION_MAX = 500
 UPDATE_TEXT_MAX = 4000
 WAIT_REASON_MAX = 300
+NAME_MAX = 200
+ADDRESS_MAX = 320
+_PROFILE_LOCK = 7_411_001
 OWNER_ROLES = (Role.MANAGER, Role.LEAD)
 
 
@@ -73,33 +77,159 @@ def _clean_address(value: str, field: str) -> str:
     return value
 
 
-def add_person(s: Session, clock: Clock, actor: Person | None, *, display_name: str, email: str, login_id: str, role: Role) -> Person:
-    """Add someone to the roster. `actor=None` is reserved for start-up seeding."""
-    if actor is not None:
-        _require(actor, Action.MANAGE_ROSTER)
-    name = (display_name or "").strip()
+def _clean_name(display_name: str) -> str:
+    name = " ".join((display_name or "").split())
     if not name:
         raise DomainError("FIELD_REQUIRED", "Name is required.", 400)
+    if len(name) > NAME_MAX:
+        raise DomainError("FIELD_TOO_LONG", f"Name is too long. Keep it under {NAME_MAX} characters.", 400)
+    return name
+
+
+def _clean_email(email: str) -> str:
     email = _clean_address(email, "Email")
-    if "@" not in email:
+    if "@" not in email or len(email) > ADDRESS_MAX:
         raise DomainError("FIELD_INVALID", "Email must be a mailbox address.", 400)
-    login_id = _clean_address(login_id, "Sign-in value")
+    return email
+
+
+def _check_password(password: str) -> None:
+    if len(password or "") < passwords.MIN_LENGTH:
+        raise DomainError("FIELD_INVALID", f"Password must be at least {passwords.MIN_LENGTH} characters.", 400)
+    if len(password) > passwords.MAX_LENGTH:
+        raise DomainError("FIELD_TOO_LONG", f"Password must be under {passwords.MAX_LENGTH} characters.", 400)
+
+
+def _new_person(s: Session, clock: Clock, actor: Person | None, *, name: str, email: str, login_id: str,
+                role: Role, password_hash: str | None = None, taken: str) -> Person:
     if s.scalar(select(Person.id).where(Person.email == email)):
-        raise DomainError("EMAIL_TAKEN", "Someone on the roster already has that email.")
+        raise DomainError("EMAIL_TAKEN", taken)
     if s.scalar(select(Person.id).where(Person.login_id == login_id)):
         raise DomainError("LOGIN_TAKEN", "Someone on the roster already has that sign-in value.")
-    person = Person(display_name=name, email=email, login_id=login_id, role=Role(role), active=True, created_at=clock.now())
+    person = Person(display_name=name, email=email, login_id=login_id, role=Role(role), active=True,
+                    password_hash=password_hash, created_at=clock.now())
     s.add(person)
     s.flush()
+    return person
+
+
+def add_person(s: Session, clock: Clock, actor: Person | None, *, display_name: str, email: str,
+               login_id: str | None = None, role: Role) -> Person:
+    """Add someone to the roster. `actor=None` is reserved for start-up set-up.
+    The sign-in value is the email unless a directory presents something else."""
+    if actor is not None:
+        _require(actor, Action.MANAGE_ROSTER)
+    name = _clean_name(display_name)
+    email = _clean_email(email)
+    login_id = _clean_address(login_id, "Sign-in value") if (login_id or "").strip() else email
+    person = _new_person(s, clock, actor, name=name, email=email, login_id=login_id, role=role,
+                         taken="Someone on the roster already has that email.")
     _audit(s, clock, actor, "person.add", "person", person.id, role=person.role.value)
     return person
 
 
-def deactivate_person(s: Session, clock: Clock, actor: Person, person_id: int) -> Person:
+def has_admin(s: Session) -> bool:
+    """Whether anyone can manage the roster. The first profile made while nobody can becomes Triage."""
+    return s.scalar(select(Person.id).where(Person.role == Role.TRIAGE, Person.active.is_(True)).limit(1)) is not None
+
+
+def register_profile(s: Session, clock: Clock, *, display_name: str, email: str, password: str) -> Person:
+    """Someone opening the app for the first time makes their own profile.
+
+    They join as a Manager, the role that can do the least; Triage raises it from the
+    roster. The exception is the first profile made while there is no Triage person:
+    that one becomes Triage, so a new install has someone who can manage the rest.
+    """
+    name = _clean_name(display_name)
+    email = _clean_email(email)
+    _check_password(password)
+    # One sign-up at a time, so two people arriving together cannot both be "the first".
+    s.execute(sql_text("select pg_advisory_xact_lock(:key)"), {"key": _PROFILE_LOCK})
+    role = Role.MANAGER if has_admin(s) else Role.TRIAGE
+    person = _new_person(
+        s, clock, None, name=name, email=email, login_id=email, role=role,
+        password_hash=passwords.hash_password(password),
+        taken="There is already a profile for that email. Sign in, or ask your Triage person for a password link.",
+    )
+    _audit(s, clock, person, "person.register", "person", person.id, role=person.role.value)
+    return person
+
+
+def authenticate(s: Session, email: str, password: str) -> Person | None:
+    """The active person with this email and password, or None. Changes nothing."""
+    person = s.scalar(select(Person).where(Person.email == (email or "").strip().lower()))
+    matches = passwords.verify_password(password or "", person.password_hash if person else None)
+    return person if matches and person is not None and person.active else None
+
+
+def set_password(s: Session, clock: Clock, person_id: int, password: str) -> Person:
+    """A person picks a new password from a password link. The link is the permission."""
+    _check_password(password)
+    person = s.get(Person, person_id, with_for_update=True)
+    if person is None or not person.active:
+        raise DomainError("NOT_FOUND", "No such person.", 404)
+    person.password_hash = passwords.hash_password(password)
+    _audit(s, clock, person, "person.set_password", "person", person.id)
+    return person
+
+
+def record_password_link(s: Session, clock: Clock, actor: Person, person: Person) -> None:
+    """Triage made a password link for someone. The link itself is never stored."""
+    _require(actor, Action.MANAGE_ROSTER)
+    _audit(s, clock, actor, "person.password_link", "person", person.id)
+
+
+def _roster_target(s: Session, actor: Person, person_id: int) -> Person:
     _require(actor, Action.MANAGE_ROSTER)
     person = s.get(Person, person_id, with_for_update=True)
     if person is None:
         raise DomainError("NOT_FOUND", "No such person.", 404)
+    return person
+
+
+def _require_another_triage(s: Session, person: Person) -> None:
+    others = s.scalar(select(func.count()).select_from(Person).where(
+        Person.role == Role.TRIAGE, Person.active.is_(True), Person.id != person.id))
+    if not others:
+        raise DomainError("LAST_TRIAGE", "This is the last active Triage person. Add another first.")
+
+
+def update_person(s: Session, clock: Clock, actor: Person, person_id: int, *, display_name: str, email: str,
+                  role: Role | str) -> Person:
+    """Triage corrects a name or mailbox, or changes a role."""
+    person = _roster_target(s, actor, person_id)
+    name = _clean_name(display_name)
+    email = _clean_email(email)
+    try:
+        role = Role(role)
+    except ValueError:
+        raise DomainError("FIELD_INVALID", "Pick a role.", 400) from None
+    changed = []
+    if name != person.display_name:
+        person.display_name = name
+        changed.append("display_name")
+    if email != person.email:
+        if s.scalar(select(Person.id).where(Person.email == email, Person.id != person.id)):
+            raise DomainError("EMAIL_TAKEN", "Someone on the roster already has that email.")
+        if person.login_id == person.email:
+            # A local profile signs in with its email, so the two move together.
+            if s.scalar(select(Person.id).where(Person.login_id == email, Person.id != person.id)):
+                raise DomainError("LOGIN_TAKEN", "Someone on the roster already has that sign-in value.")
+            person.login_id = email
+        person.email = email
+        changed.append("email")
+    if role != person.role:
+        if person.role == Role.TRIAGE and person.active:
+            _require_another_triage(s, person)
+        person.role = role
+        changed.append("role")
+    if changed:
+        _audit(s, clock, actor, "person.update", "person", person.id, fields=changed, role=person.role.value)
+    return person
+
+
+def deactivate_person(s: Session, clock: Clock, actor: Person, person_id: int) -> Person:
+    person = _roster_target(s, actor, person_id)
     if not person.active:
         return person
     active_work = s.scalar(
@@ -113,13 +243,40 @@ def deactivate_person(s: Session, clock: Clock, actor: Person, person_id: int) -
             f"{person.display_name} owns {active_work} active assignment(s). Reassign them first.",
         )
     if person.role == Role.TRIAGE:
-        others = s.scalar(select(func.count()).select_from(Person).where(
-            Person.role == Role.TRIAGE, Person.active.is_(True), Person.id != person.id))
-        if not others:
-            raise DomainError("LAST_TRIAGE", "This is the last active Triage person. Add another first.")
+        _require_another_triage(s, person)
     person.active = False
     _audit(s, clock, actor, "person.deactivate", "person", person.id)
     return person
+
+
+def reactivate_person(s: Session, clock: Clock, actor: Person, person_id: int) -> Person:
+    person = _roster_target(s, actor, person_id)
+    if not person.active:
+        person.active = True
+        _audit(s, clock, actor, "person.reactivate", "person", person.id)
+    return person
+
+
+def remove_person(s: Session, clock: Clock, actor: Person, person_id: int) -> None:
+    """Delete a profile outright. Only for one with no history (a mistaken or unwanted sign-up);
+    anyone who has owned, written or asked for anything is deactivated instead."""
+    person = _roster_target(s, actor, person_id)
+    if person.id == actor.id:
+        raise DomainError("IS_YOU", "You cannot remove your own profile.")
+    has_history = any(
+        s.scalar(select(column).where(column == person.id).limit(1)) is not None
+        for column in (Firedrill.created_by_id, Assignment.owner_id, Update.author_id,
+                       Update.on_behalf_of_id, UpdateRequest.asked_by_id)
+    )
+    if has_history:
+        raise DomainError("PERSON_HAS_HISTORY", f"{person.display_name} has history on the board. Deactivate them instead.")
+    if person.role == Role.TRIAGE and person.active:
+        _require_another_triage(s, person)
+    s.execute(delete(UsageEvent).where(UsageEvent.person_id == person.id))
+    s.execute(update(AuditLog).where(AuditLog.actor_id == person.id).values(actor_id=None))
+    s.delete(person)
+    s.flush()
+    _audit(s, clock, actor, "person.remove", "person", person_id)
 
 
 def ensure_first_triage(s: Session, clock: Clock, *, login_id: str, email: str, display_name: str) -> Person:

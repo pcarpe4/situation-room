@@ -119,6 +119,23 @@ def client(app):
         yield c
 
 
+@pytest.fixture
+def local_cfg(db_url):
+    return config_mod.load(make_env(db_url, SR_AUTH_MODE="local"))
+
+
+@pytest.fixture
+def local_app(local_cfg, clock, engine):
+    return create_app(local_cfg, clock=clock, engine=engine)
+
+
+@pytest.fixture
+def local_client(local_app):
+    """The app as it is hosted: people make their own profile and sign in with a password."""
+    with TestClient(local_app) as c:
+        yield c
+
+
 class People:
     def __init__(self, db, clock):
         def add(name: str, role: Role) -> Person:

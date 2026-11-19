@@ -242,6 +242,11 @@ table.roster { width: 100%; border-collapse: collapse; background: var(--surface
 table.roster th, table.roster td { text-align: left; padding: 0.5rem; border-bottom: 1px solid var(--line); font-size: 0.9rem; }
 table.roster tr.inactive td { color: var(--muted); }
 table.roster form { margin: 0; }
+button.danger { color: var(--action); border-color: var(--action); }
+button:disabled { opacity: 0.55; cursor: not-allowed; }
+.link-box { margin: 1rem 0; padding: 0.75rem 1rem; }
+.link-box h2 { margin-top: 0; font-size: 1rem; }
+.link-box input { font-family: ui-monospace, monospace; font-size: 0.85rem; }
 
 .cal-head { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; align-items: center; justify-content: space-between; }
 .cal-head h1 { margin: 0.5rem 0; }
